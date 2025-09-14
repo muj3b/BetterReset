@@ -13,10 +13,6 @@ commands:
     usage: /betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about> [...]
     aliases: [br]
     permission: betterreset.use
-  fullreset:
-    description: Legacy alias; use /betterreset fullreset
-    usage: /betterreset fullreset <world> [confirm|--confirm] [--seed <long>|--seed random]
-    permission: betterreset.use
 
 permissions:
   betterreset.use:

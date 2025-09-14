@@ -2,7 +2,6 @@ package com.github.codex.fullreset;
 
 import com.github.codex.fullreset.command.BetterResetCommand;
 import com.github.codex.fullreset.command.FullResetCommand;
-import com.github.codex.fullreset.command.LegacyFullResetCommand;
 import com.github.codex.fullreset.core.ConfirmationManager;
 import com.github.codex.fullreset.core.ResetService;
 import com.github.codex.fullreset.ui.GuiManager;
@@ -49,13 +48,7 @@ public final class FullResetPlugin extends JavaPlugin {
         } else {
             getLogger().severe("Command 'betterreset' not found in plugin.yml");
         }
-        // Legacy alias for /fullreset – shows hint and delegates
-        FullResetCommand inner = new FullResetCommand(this, resetService, confirmationManager);
-        LegacyFullResetCommand legacy = new LegacyFullResetCommand(this, inner);
-        if (getCommand("fullreset") != null) {
-            getCommand("fullreset").setExecutor(legacy);
-            getCommand("fullreset").setTabCompleter(inner);
-        }
+        // No top-level /fullreset command; use /betterreset fullreset
 
         getLogger().info("BetterReset enabled.");
     }
