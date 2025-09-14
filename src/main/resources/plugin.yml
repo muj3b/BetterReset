@@ -1,5 +1,5 @@
 name: BetterReset
-version: 1.0.1
+version: 1.0.2
 main: com.github.codex.fullreset.FullResetPlugin
 api-version: '1.21'
 author: muj3b

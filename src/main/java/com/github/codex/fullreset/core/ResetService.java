@@ -137,6 +137,12 @@ public class ResetService {
                         safeTeleport(p, fallback.getSpawnLocation());
                     }
                 }
+                // Double-check any players still in target worlds and teleport again
+                for (Player online : Bukkit.getOnlinePlayers()) {
+                    if (worldNames.contains(online.getWorld().getName())) {
+                        safeTeleport(online, fallback.getSpawnLocation());
+                    }
+                }
 
                 // Resolve world folders before unloading, in case some are not loaded
                 Map<String, Path> worldFolders = resolveWorldFolders(worldNames);
@@ -212,6 +218,7 @@ public class ResetService {
                     auditLogger.log(plugin, "Reset failed creating overworld for '" + base + "'");
                     return;
                 }
+                try { overworld.getChunkAt(overworld.getSpawnLocation()).load(true); } catch (Exception ignored) {}
                 multiverseCompat.ensureRegistered(base, World.Environment.NORMAL, baseSeed);
             }
 
@@ -230,6 +237,7 @@ public class ResetService {
                     auditLogger.log(plugin, "Reset failed creating nether for '" + base + "'");
                     return;
                 }
+                try { nether.getChunkAt(nether.getSpawnLocation()).load(true); } catch (Exception ignored) {}
                 multiverseCompat.ensureRegistered(base + "_nether", World.Environment.NETHER, netherSeed);
             }
 
@@ -248,6 +256,7 @@ public class ResetService {
                     auditLogger.log(plugin, "Reset failed creating the_end for '" + base + "'");
                     return;
                 }
+                try { theEnd.getChunkAt(theEnd.getSpawnLocation()).load(true); } catch (Exception ignored) {}
                 multiverseCompat.ensureRegistered(base + "_the_end", World.Environment.THE_END, endSeed);
             }
 
@@ -277,6 +286,7 @@ public class ResetService {
             auditLogger.log(plugin, "Reset completed for '" + base + "'");
             resetInProgress = false;
             phase = "IDLE";
+            try { ((com.github.codex.fullreset.FullResetPlugin) plugin).getRespawnManager().markReset(base); } catch (Exception ignored) {}
         } catch (Exception ex) {
             Messages.send(initiator, "&cError recreating worlds: " + ex.getMessage());
             resetInProgress = false;

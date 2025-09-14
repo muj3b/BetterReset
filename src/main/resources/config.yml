@@ -13,6 +13,10 @@ seeds:
 players:
   # After reset and recreation, return affected players to the new overworld spawn
   returnToNewSpawnAfterReset: true
+  # If true, players who die shortly after a reset are forced to respawn at the new overworld spawn
+  forceRespawnToNewOverworld: true
+  # How long after a reset to enforce respawn override (seconds)
+  respawnRecentWindowSeconds: 600
 
 messages:
   noPermission: "&cYou don't have permission to use this command."

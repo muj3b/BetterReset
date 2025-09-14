@@ -63,6 +63,7 @@ public class GuiManager implements Listener {
         Inventory inv = Bukkit.createInventory(p, 54, TITLE_SELECT);
         Set<String> bases = Bukkit.getWorlds().stream()
                 .map(World::getName)
+                .filter(n -> !n.startsWith("betterreset_safe_"))
                 .map(GuiManager::baseName)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         int slot = 0;
