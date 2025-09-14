@@ -1,52 +1,147 @@
-BetterReset (Paper/Spigot 1.21+)
+# 🔁 BetterReset — Live Overworld/Nether/End Reset
 
-Summary
-- Reset a world's overworld, nether, and end while the server is running, using one command.
-- Teleports players out first, unloads worlds, deletes folders asynchronously, and recreates dimensions with new seeds.
-- Optional seed parameter, confirmation flow to prevent mistakes, and Multiverse-Core friendly (softdepend, no hard link).
- - GUI to choose world and confirm (with custom seed prompt).
- - Big on-screen countdown (title + bossbar) with credit: "plugin made by muj3b".
+<div align="center">
 
-Requirements
-- Java 17+
-- PaperMC or Spigot 1.21+
+![Minecraft](https://img.shields.io/badge/Minecraft-1.21.x%2B-brightgreen?style=for-the-badge&logo=minecraft)
+![API](https://img.shields.io/badge/API-Paper%2FSpigot_1.21%2B-blue?style=for-the-badge)
+![Java](https://img.shields.io/badge/Java-17%2B-orange?style=for-the-badge&logo=openjdk)
+![Status](https://img.shields.io/badge/Status-Production_Ready-success?style=for-the-badge)
+![MV](https://img.shields.io/badge/Multiverse-Soft_Depend-9cf?style=for-the-badge)
 
-Install
-1. Build with `mvn package` and place `target/betterreset-1.0.0.jar` into your server's `plugins/` folder.
-2. Start the server to generate `plugins/BetterReset/config.yml`.
-3. Adjust messages and behavior in `config.yml` as desired.
+</div>
 
-Commands
-- Root: `/betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about>`
-  - `/betterreset fullreset <world> [confirm|--confirm] [--seed <long>|--seed random]`
-    - Permission: `betterreset.use` (default: OP)
-  - Examples:
-    - `/betterreset fullreset world` → shows warning; you must confirm
-    - `/betterreset fullreset world confirm` → proceed with random seeds
-    - `/betterreset fullreset world --seed 12345 confirm` → use seed 12345 for all dimensions (configurable)
-  - `/betterreset gui` → opens world selection and confirmation GUI (permission: `betterreset.gui`, default OP)
-  - `/betterreset reload` → reloads config/messages (permission: `betterreset.reload`, default OP)
-  - `/betterreset creator` → shows a clickable donation link (permission: `betterreset.creator`)
-  - `/betterreset status` → shows current reset status (permission: `betterreset.status`)
-  - `/betterreset cancel` → cancels an active countdown (permission: `betterreset.cancel`)
-  - `/betterreset fallback <world|none>` → sets fallback world (permission: `betterreset.fallback`)
-  - `/betterreset seedsame <true|false>` → toggles same-seed policy (permission: `betterreset.seedsame`)
-  - `/betterreset listworlds` → lists loaded base worlds (permission: `betterreset.listworlds`)
-  - `/betterreset about` → shows plugin version/author (permission: `betterreset.about`)
-- Legacy alias: `/fullreset ...` still works but prints a hint to use `/betterreset`.
+---
 
-Behavior
-- Players in the target world's overworld, nether, or end are teleported to a safe fallback world.
-- The three dimensions are unloaded, then their folders are deleted asynchronously.
-- The overworld, nether, and end are recreated with new seeds.
-- Optionally, affected players are returned to the new overworld spawn (configurable).
-- Countdown can be canceled; status can be queried; display can be broadcast to all or just affected players.
+> Safely reset a world's Overworld, Nether, and End while the server is running. Player-safe teleports, clean unload, async deletion, and full regeneration — all in one command or via a sleek GUI.
 
-Multiverse-Core
-- The plugin does not require Multiverse-Core, but has a softdepend and avoids conflicts.
-- Multiverse typically detects world loads/unloads via events when worlds are recreated with the same names.
+---
 
-Notes
-- The plugin follows Bukkit best practices: all Bukkit calls on the main thread; heavy disk IO deletion is async.
-- Folder deletion is constrained to the server's world container for safety.
-- Confirmation can be bypassed by console or permissions; `--force` flag is supported for authorized users.
+## ✨ Highlights
+
+- ⚡ One command to reset all three dimensions for a base world.
+- 🧍 Player safety first: teleport to a fallback world before unload.
+- 🧹 Async deletion of world folders for smooth performance.
+- 🌱 New random seeds or a custom seed you choose.
+- 🖱️ GUI world selector with Confirm and Custom Seed prompt.
+- ⏱️ Big title + bossbar countdown with credit “plugin made by muj3b”.
+- 🧭 Multiverse-Core friendly (softdepend, no hard link).
+- 🧰 Admin tools: status, cancel, force flag, notify permission, audit logs.
+- 🔊 Broadcast control (all players or just affected dimensions).
+- 🧷 Configurable fallback world and online-player threshold gate.
+
+---
+
+## 📥 Installation
+
+1. Build with `mvn package` (Java 17+).
+2. Place `target/betterreset-1.0.0.jar` into your server’s `plugins/` folder.
+3. Start the server to generate `plugins/BetterReset/config.yml`.
+4. Tweak messages and behavior in `config.yml` as needed.
+
+Requirements: PaperMC or Spigot 1.21+ and Java 17+.
+
+---
+
+## 🕹️ Commands
+
+Root: `/betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about>`
+
+| Command | Description | Permission | Default |
+|:--|:--|:--|:--|
+| `/betterreset fullreset <world> [confirm|--confirm] [--seed <long>|--seed random] [--force]` | Reset Overworld+Nether+End for `<world>` | `betterreset.use` | OP |
+| `/betterreset gui` | Open GUI world selector + confirm | `betterreset.gui` | OP |
+| `/betterreset reload` | Reload config/messages | `betterreset.reload` | OP |
+| `/betterreset creator` | Show clickable donation link | `betterreset.creator` | Everyone |
+| `/betterreset status` | Show current state (IDLE/COUNTDOWN/RUNNING) | `betterreset.status` | Everyone |
+| `/betterreset cancel` | Cancel active countdown | `betterreset.cancel` | OP |
+| `/betterreset fallback <world|none>` | Set fallback world | `betterreset.fallback` | OP |
+| `/betterreset seedsame <true|false>` | Toggle same-seed policy | `betterreset.seedsame` | OP |
+| `/betterreset listworlds` | List loaded base worlds | `betterreset.listworlds` | Everyone |
+| `/betterreset about` | Show plugin version/author | `betterreset.about` | Everyone |
+
+Examples:
+
+```text
+/betterreset fullreset world         # show warning, then confirm
+/betterreset fullreset world confirm # proceed with random seed
+/betterreset fullreset world --seed 12345 confirm
+/betterreset fullreset world --force # skip confirm (requires permission)
+/betterreset gui                     # GUI flow with Random or Custom Seed
+```
+
+---
+
+## ⚙️ Configuration (essentials)
+
+Edit `plugins/BetterReset/config.yml` after first run. Key options:
+
+```yaml
+confirmation:
+  requireConfirm: true
+  timeoutSeconds: 15
+  consoleBypasses: true
+
+seeds:
+  useSameSeedForAllDimensions: true
+
+players:
+  returnToNewSpawnAfterReset: true
+
+countdown:
+  seconds: 10
+  broadcastToAll: true
+
+teleport:
+  fallbackWorldName: ""
+
+limits:
+  maxOnlineForReset: -1  # -1 disables the check
+
+messages:
+  noPermission: "&cYou don't have permission to use this command."
+  countdownTitle: "&cReset in %s..."
+  countdownSubtitle: "&7plugin made by muj3b"
+```
+
+---
+
+## 🔍 How It Works
+
+1) Detect affected players and safely teleport them to a fallback world.  
+2) Unload Overworld/Nether/End for the target base world on the main thread.  
+3) Delete world folders asynchronously off the main thread.  
+4) Recreate Overworld/Nether/End with new seeds.  
+5) Optionally return affected players to the new spawn.
+
+Best practices followed: Bukkit calls are main-thread; disk IO deletion is async; folder deletes are restricted to the world container.
+
+---
+
+## 🔌 Multiverse-Core
+
+BetterReset doesn’t require Multiverse-Core. If present, the plugin tries (via reflection) to register/import/load recreated worlds so MV stays in sync. World names remain consistent (`<world>`, `<world>_nether`, `<world>_the_end`).
+
+---
+
+## 🙌 Support the Creator
+
+Open in-game with `/betterreset creator` or click below:
+
+<div align="center">
+
+[![Donate](https://img.shields.io/badge/%F0%9F%92%96_Donate-Support_Development-ff69b4?style=for-the-badge)](https://donate.stripe.com/8x29AT0H58K03judnR0Ba01)
+
+</div>
+
+---
+
+## 🧩 Notes & Tips
+
+- Use `/betterreset status` and `/betterreset cancel` to manage countdowns.  
+- `--force` requires the `betterreset.force` permission.  
+- Admin notifications go to players with `betterreset.notify`.  
+- A fallback world can be set via config or `/betterreset fallback <world>`.
+
+---
+
+Developed by muj3b • Paper/Spigot 1.21+ • Java 17+
