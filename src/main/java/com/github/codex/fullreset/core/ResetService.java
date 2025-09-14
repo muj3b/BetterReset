@@ -155,12 +155,26 @@ public class ResetService {
                     }
                 }
 
-                Messages.send(initiator, "&7Worlds unloaded. Archiving backups and recreating...");
+                boolean backupsEnabled = plugin.getConfig().getBoolean("backups.enabled", true);
+                Messages.send(initiator, backupsEnabled ? "&7Worlds unloaded. Archiving backups and recreating..." : "&7Worlds unloaded. Deleting old folders and recreating...");
 
-                // Async snapshot (move) then recreate
+                // Async snapshot (move) or delete, then recreate
                 CompletableFuture.runAsync(() -> {
                     try {
-                        backupManager.snapshot(worldBase, worldFolders);
+                        if (backupsEnabled) {
+                            backupManager.snapshot(worldBase, worldFolders);
+                        } else {
+                            // Delete in async
+                            for (Path path : worldFolders.values()) {
+                                if (path != null && Files.exists(path)) {
+                                    try {
+                                        deletePath(path);
+                                    } catch (IOException ex) {
+                                        plugin.getLogger().warning("Delete failed for " + path + ": " + ex.getMessage());
+                                    }
+                                }
+                            }
+                        }
                         Bukkit.getScheduler().runTask(plugin, () -> recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers, dims));
                     } catch (Exception ex) {
                         Bukkit.getScheduler().runTask(plugin, () -> {
@@ -391,6 +405,11 @@ public class ResetService {
                             }
                         }
                         Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a'.");
+                        // Teleport initiator to overworld spawn if player
+                        if (initiator instanceof Player ip) {
+                            World w = Bukkit.getWorld(base);
+                            if (w != null) safeTeleport(ip, w.getSpawnLocation());
+                        }
                         resetInProgress = false;
                         phase = "IDLE";
                     });
@@ -450,6 +469,10 @@ public class ResetService {
                             }
                         }
                         Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a' for " + dims + ".");
+                        if (initiator instanceof Player ip) {
+                            World w = Bukkit.getWorld(base);
+                            if (w != null) safeTeleport(ip, w.getSpawnLocation());
+                        }
                         resetInProgress = false;
                         phase = "IDLE";
                     });
@@ -486,6 +509,17 @@ public class ResetService {
                 Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aPrune complete."));
             } catch (Exception ex) {
                 Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cPrune failed: " + ex.getMessage()));
+            }
+        });
+    }
+
+    public void deleteAllBackupsForBaseAsync(CommandSender initiator, String base) {
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                backupManager.deleteAllForBase(base);
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aDeleted all backups for '&e" + base + "&a'."));
+            } catch (Exception ex) {
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cDelete all failed: " + ex.getMessage()));
             }
         });
     }

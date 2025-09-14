@@ -39,6 +39,8 @@ confirmation:
   consoleBypasses: true
 
 backups:
+  # Enable creating backups before reset. Disable to save storage (folders are deleted instead).
+  enabled: true
   # Keep at most this many snapshots per base world (older are pruned)
   maxPerBase: 5
   # Keep at most this many snapshots total across all bases

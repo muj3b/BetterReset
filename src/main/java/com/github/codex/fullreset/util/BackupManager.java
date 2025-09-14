@@ -152,6 +152,11 @@ public class BackupManager {
         deleteTree(dir);
     }
 
+    public void deleteAllForBase(String base) throws IOException {
+        Path dir = backupsRoot.resolve(base);
+        deleteTree(dir);
+    }
+
     public int pruneAll() {
         int removed = 0;
         try {

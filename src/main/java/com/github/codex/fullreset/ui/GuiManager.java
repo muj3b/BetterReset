@@ -100,8 +100,10 @@ public class GuiManager implements Listener {
         for (var ref : refs) {
             if (slot >= 53) break; // keep last slot for back
             String label = ChatColor.GOLD + ref.base() + ChatColor.GRAY + " @ " + ChatColor.YELLOW + ref.timestamp();
-            inv.setItem(slot++, named(Material.CHEST, label, ChatColor.GRAY + "Click to restore"));
+            inv.setItem(slot++, named(Material.CHEST, label, ChatColor.GRAY + "Click to restore", ChatColor.DARK_GRAY + "ID:" + ref.base() + "|" + ref.timestamp()));
         }
+        // Prune Now button and Back
+        inv.setItem(49, named(Material.SHEARS, ChatColor.RED + "Prune Now"));
         inv.setItem(53, named(Material.ARROW, ChatColor.YELLOW + "Back"));
         p.openInventory(inv);
     }
@@ -120,6 +122,13 @@ public class GuiManager implements Listener {
     private void openDeleteConfirm(Player p, String base, String ts) {
         Inventory inv = Bukkit.createInventory(p, 27, TITLE_DELETE_BACKUP + base + ChatColor.GRAY + " @ " + ts);
         inv.setItem(11, named(Material.RED_CONCRETE, ChatColor.DARK_RED + "Confirm Delete"));
+        inv.setItem(15, named(Material.ARROW, ChatColor.YELLOW + "Cancel"));
+        p.openInventory(inv);
+    }
+
+    private void openDeleteAllConfirm(Player p, String base) {
+        Inventory inv = Bukkit.createInventory(p, 27, ChatColor.DARK_RED + "Delete ALL | " + base);
+        inv.setItem(11, named(Material.RED_CONCRETE, ChatColor.DARK_RED + "Confirm Delete All"));
         inv.setItem(15, named(Material.ARROW, ChatColor.YELLOW + "Cancel"));
         p.openInventory(inv);
     }
@@ -172,14 +181,30 @@ public class GuiManager implements Listener {
         if (TITLE_BACKUPS.equals(title)) {
             e.setCancelled(true);
             if (dn.equalsIgnoreCase("Back")) { openMain(p); return; }
-            // Expect format: base @ timestamp
-            String raw = ChatColor.stripColor(it.getItemMeta().getDisplayName());
-            String[] parts = raw.split(" @ ", 2);
-            if (parts.length == 2) {
-                String base = parts[0];
-                String ts = parts[1];
-                openBackupOptions(p, base, ts);
+            if (dn.equalsIgnoreCase("Prune Now")) {
+                if (!p.hasPermission("betterreset.prune")) { Messages.send(p, plugin.getConfig().getString("messages.noPermission")); return; }
+                p.closeInventory();
+                resetService.pruneBackupsAsync(p, Optional.empty());
+                return;
             }
+            // Expect format: base @ timestamp
+            String base = null, ts = null;
+            List<String> lore = it.getItemMeta().getLore();
+            if (lore != null) {
+                for (String line : lore) {
+                    String s = ChatColor.stripColor(line);
+                    if (s.startsWith("ID:")) {
+                        String[] ids = s.substring(3).split("\\|", 2);
+                        if (ids.length == 2) { base = ids[0]; ts = ids[1]; break; }
+                    }
+                }
+            }
+            if (base == null || ts == null) {
+                String raw = ChatColor.stripColor(it.getItemMeta().getDisplayName());
+                String[] parts = raw.split(" @ ", 2);
+                if (parts.length == 2) { base = parts[0]; ts = parts[1]; }
+            }
+            if (base != null && ts != null) openBackupOptions(p, base, ts);
             return;
         }
         if (title.startsWith(TITLE_BACKUP_OPTIONS)) {
@@ -199,6 +224,10 @@ public class GuiManager implements Listener {
                     if (!p.hasPermission("betterreset.backups")) { Messages.send(p, plugin.getConfig().getString("messages.noPermission")); }
                     else { openDeleteConfirm(p, base, ts); }
                 }
+                case "Delete ALL for Base" -> {
+                    if (!p.hasPermission("betterreset.backups")) { Messages.send(p, plugin.getConfig().getString("messages.noPermission")); }
+                    else { openDeleteAllConfirm(p, base); }
+                }
             }
             return;
         }
@@ -212,6 +241,15 @@ public class GuiManager implements Listener {
             switch (dn) {
                 case "Confirm Delete" -> { p.closeInventory(); resetService.deleteBackupAsync(p, base, ts); }
                 case "Cancel" -> openBackupOptions(p, base, ts);
+            }
+            return;
+        }
+        if (title.startsWith(ChatColor.DARK_RED + "Delete ALL | ")) {
+            e.setCancelled(true);
+            String base = ChatColor.stripColor(title.substring((ChatColor.DARK_RED + "Delete ALL | ").length()));
+            switch (dn) {
+                case "Confirm Delete All" -> { p.closeInventory(); resetService.deleteAllBackupsForBaseAsync(p, base); }
+                case "Cancel" -> openBackups(p);
             }
             return;
         }
