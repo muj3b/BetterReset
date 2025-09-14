@@ -150,6 +150,19 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                 }
                 Messages.send(sender, "&bBetterReset &7v" + plugin.getDescription().getVersion() + " &7by &emuj3b&7. Type &e/" + label + " creator &7to support.");
                 return true;
+            case "prune":
+                if (!sender.hasPermission("betterreset.prune")) {
+                    Messages.send(sender, plugin.getConfig().getString("messages.noPermission"));
+                    return true;
+                }
+                if (args.length >= 2) {
+                    resetService.pruneBackupsAsync(sender, Optional.of(args[1]));
+                    Messages.send(sender, "&ePruning backups for '&6" + args[1] + "&e'...");
+                } else {
+                    resetService.pruneBackupsAsync(sender, Optional.empty());
+                    Messages.send(sender, "&ePruning all backups as per config policy...");
+                }
+                return true;
             default:
                 Messages.send(sender, "&cUnknown subcommand. Use &e/" + label + " <fullreset|gui|reload>");
                 return true;
@@ -168,7 +181,18 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
             String[] shifted = Arrays.copyOfRange(args, 1, args.length);
             return delegate.onTabComplete(sender, command, alias, shifted);
         }
-        if (args.length == 1) return java.util.Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about");
+        if (args.length == 1) return java.util.Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune");
+        if (args.length == 2 && args[0].equalsIgnoreCase("prune")) {
+            // Suggest known bases from loaded worlds and backup list
+            java.util.Set<String> suggestions = new java.util.LinkedHashSet<>();
+            for (org.bukkit.World w : Bukkit.getWorlds()) suggestions.add(base(w.getName()));
+            try {
+                java.util.List<com.github.codex.fullreset.util.BackupManager.BackupRef> refs = resetService.listBackups();
+                for (var r : refs) suggestions.add(r.base());
+            } catch (Exception ignored) {}
+            String pre = args[1].toLowerCase(java.util.Locale.ROOT);
+            return suggestions.stream().filter(s -> s.toLowerCase(java.util.Locale.ROOT).startsWith(pre)).collect(java.util.stream.Collectors.toList());
+        }
         if (args.length == 2 && args[0].equalsIgnoreCase("fallback")) {
             String prefix = args[1].toLowerCase(java.util.Locale.ROOT);
             return Bukkit.getWorlds().stream().map(World::getName).filter(n -> n.toLowerCase(java.util.Locale.ROOT).startsWith(prefix)).collect(java.util.stream.Collectors.toList());

@@ -464,6 +464,32 @@ public class ResetService {
         });
     }
 
+    public void deleteBackupAsync(CommandSender initiator, String base, String timestamp) {
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                backupManager.deleteBackup(base, timestamp);
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aDeleted backup '&e" + base + " @ " + timestamp + "&a'."));
+            } catch (Exception ex) {
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cDelete failed: " + ex.getMessage()));
+            }
+        });
+    }
+
+    public void pruneBackupsAsync(CommandSender initiator, Optional<String> baseOpt) {
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                if (baseOpt.isPresent()) {
+                    backupManager.prune(baseOpt.get());
+                } else {
+                    backupManager.pruneAll();
+                }
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aPrune complete."));
+            } catch (Exception ex) {
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cPrune failed: " + ex.getMessage()));
+            }
+        });
+    }
+
     private void safeTeleport(Player p, Location to) {
         try {
             // Use sync teleport for Spigot compatibility; Paper may optimize internally

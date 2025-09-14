@@ -32,6 +32,7 @@ public class GuiManager implements Listener {
     private static final String TITLE_RESET_FOR = ChatColor.DARK_RED + "Reset | ";
     private static final String TITLE_BACKUPS = ChatColor.GOLD + "Backups";
     private static final String TITLE_BACKUP_OPTIONS = ChatColor.DARK_PURPLE + "Restore | ";
+    private static final String TITLE_DELETE_BACKUP = ChatColor.DARK_RED + "Delete | ";
 
     private final FullResetPlugin plugin;
     private final ResetService resetService;
@@ -111,7 +112,15 @@ public class GuiManager implements Listener {
         inv.setItem(12, named(Material.GRASS_BLOCK, ChatColor.WHITE + "Restore Overworld"));
         inv.setItem(14, named(Material.NETHERRACK, ChatColor.WHITE + "Restore Nether"));
         inv.setItem(16, named(Material.END_STONE, ChatColor.WHITE + "Restore End"));
+        inv.setItem(20, named(Material.TNT, ChatColor.RED + "Delete Backup"));
         inv.setItem(22, named(Material.ARROW, ChatColor.YELLOW + "Back"));
+        p.openInventory(inv);
+    }
+
+    private void openDeleteConfirm(Player p, String base, String ts) {
+        Inventory inv = Bukkit.createInventory(p, 27, TITLE_DELETE_BACKUP + base + ChatColor.GRAY + " @ " + ts);
+        inv.setItem(11, named(Material.RED_CONCRETE, ChatColor.DARK_RED + "Confirm Delete"));
+        inv.setItem(15, named(Material.ARROW, ChatColor.YELLOW + "Cancel"));
         p.openInventory(inv);
     }
 
@@ -186,7 +195,25 @@ public class GuiManager implements Listener {
                 case "Restore Overworld" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.OVERWORLD)); }
                 case "Restore Nether" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.NETHER)); }
                 case "Restore End" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.END)); }
+                case "Delete Backup" -> {
+                    if (!p.hasPermission("betterreset.backups")) { Messages.send(p, plugin.getConfig().getString("messages.noPermission")); }
+                    else { openDeleteConfirm(p, base, ts); }
+                }
             }
+            return;
+        }
+        if (title.startsWith(TITLE_DELETE_BACKUP)) {
+            e.setCancelled(true);
+            String raw = ChatColor.stripColor(title.substring(TITLE_DELETE_BACKUP.length())); // base @ ts
+            String[] parts = raw.split(" @ ", 2);
+            if (parts.length != 2) { openBackups(p); return; }
+            String base = parts[0];
+            String ts = parts[1];
+            switch (dn) {
+                case "Confirm Delete" -> { p.closeInventory(); resetService.deleteBackupAsync(p, base, ts); }
+                case "Cancel" -> openBackupOptions(p, base, ts);
+            }
+            return;
         }
     }
 

@@ -147,6 +147,27 @@ public class BackupManager {
         });
     }
 
+    public void deleteBackup(String base, String timestamp) throws IOException {
+        Path dir = backupsRoot.resolve(base).resolve(timestamp);
+        deleteTree(dir);
+    }
+
+    public int pruneAll() {
+        int removed = 0;
+        try {
+            if (!Files.exists(backupsRoot)) return 0;
+            try (DirectoryStream<Path> ds = Files.newDirectoryStream(backupsRoot)) {
+                for (Path base : ds) {
+                    if (Files.isDirectory(base)) {
+                        prune(base.getFileName().toString());
+                        // Approximate count by diff size before/after
+                    }
+                }
+            }
+        } catch (IOException ignored) {}
+        return removed;
+    }
+
     public void prune(String base) {
         try {
             int maxPerBase = plugin.getConfig().getInt("backups.maxPerBase", 5);
