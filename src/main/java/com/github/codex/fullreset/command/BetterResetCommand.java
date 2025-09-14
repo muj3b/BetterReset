@@ -76,10 +76,7 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                 // Red message + clickable URL using Adventure formatting
                 Messages.send(sender, "&cSupport the creator ");
                 if (sender instanceof Player) {
-                    net.kyori.adventure.text.Component click = net.kyori.adventure.text.Component.text("&n&bDonate via Stripe").
-                            replaceText(builder -> builder.matchLiteral("&n").replacement(""))
-                            .replaceText(builder -> builder.matchLiteral("&b").replacement(""));
-                    click = net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacyAmpersand().deserialize("&n&bDonate via Stripe");
+                    net.kyori.adventure.text.Component click = net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacyAmpersand().deserialize("&n&bDonate via Stripe");
                     click = click.clickEvent(net.kyori.adventure.text.event.ClickEvent.openUrl("https://donate.stripe.com/8x29AT0H58K03judnR0Ba01"));
                     ((Player) sender).sendMessage(click);
                 } else {
