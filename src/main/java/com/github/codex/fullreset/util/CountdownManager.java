@@ -15,37 +15,77 @@ import java.util.Set;
 public class CountdownManager {
 
     private final FullResetPlugin plugin;
+    private volatile BukkitRunnable currentTask;
+    private volatile BossBar currentBar;
+    private volatile String currentLabel = null;
+    private volatile int totalSeconds = 0;
+    private volatile int secondsLeft = 0;
 
     public CountdownManager(FullResetPlugin plugin) {
         this.plugin = plugin;
     }
 
-    public void runCountdown(String world, int seconds, Runnable onFinish) {
-        Set<Player> audience = new HashSet<>(Bukkit.getOnlinePlayers());
-        // BossBar via adventure
-        BossBar bar = BossBar.bossBar(Component.text("Reset " + world), 1.0f, BossBar.Color.RED, BossBar.Overlay.PROGRESS);
-        audience.forEach(p -> p.showBossBar(bar));
+    public synchronized void runCountdown(String world, int seconds, Set<Player> audience, Runnable onFinish) {
+        cancel();
+        this.currentLabel = world;
+        this.totalSeconds = Math.max(1, seconds);
+        this.secondsLeft = this.totalSeconds;
 
-        final int total = Math.max(1, seconds);
-        new BukkitRunnable() {
-            int left = total + 1; // first tick decrements to total
+        BossBar bar = BossBar.bossBar(Component.text("Reset " + world), 1.0f, BossBar.Color.RED, BossBar.Overlay.PROGRESS);
+        this.currentBar = bar;
+        if (audience == null || audience.isEmpty()) {
+            audience = new HashSet<>(Bukkit.getOnlinePlayers());
+        }
+        Set<Player> finalAudience = audience;
+        finalAudience.forEach(p -> p.showBossBar(bar));
+
+        this.currentTask = new BukkitRunnable() {
             @Override
             public void run() {
-                left--;
-                float progress = Math.max(0f, (float) left / (float) total);
+                secondsLeft--;
+                float progress = Math.max(0f, (float) secondsLeft / (float) totalSeconds);
                 bar.progress(progress);
-                String line1 = plugin.getConfig().getString("messages.countdownTitle", "Reset in %s...").replace("%s", String.valueOf(Math.max(0, left)));
+                String line1 = plugin.getConfig().getString("messages.countdownTitle", "Reset in %s...").replace("%s", String.valueOf(Math.max(0, secondsLeft)));
                 String line2 = plugin.getConfig().getString("messages.countdownSubtitle", "plugin made by muj3b");
                 Title title = Title.title(Component.text(line1), Component.text(line2), Title.Times.times(Duration.ofMillis(100), Duration.ofMillis(900), Duration.ofMillis(100)));
                 for (Player p : Bukkit.getOnlinePlayers()) {
                     p.showTitle(title);
                 }
-                if (left <= 0) {
+                if (secondsLeft <= 0) {
                     cancel();
-                    audience.forEach(p -> p.hideBossBar(bar));
+                    finalAudience.forEach(p -> p.hideBossBar(bar));
+                    clearState();
                     onFinish.run();
                 }
             }
-        }.runTaskTimer(plugin, 0L, 20L);
+        };
+        this.currentTask.runTaskTimer(plugin, 0L, 20L);
     }
+
+    public synchronized boolean cancel() {
+        if (currentTask != null) {
+            try { currentTask.cancel(); } catch (Exception ignored) {}
+        }
+        if (currentBar != null) {
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                try { p.hideBossBar(currentBar); } catch (Exception ignored) {}
+            }
+        }
+        boolean wasActive = currentLabel != null;
+        clearState();
+        return wasActive;
+    }
+
+    private void clearState() {
+        currentTask = null;
+        currentBar = null;
+        currentLabel = null;
+        totalSeconds = 0;
+        secondsLeft = 0;
+    }
+
+    public boolean isActive() { return currentLabel != null; }
+    public String currentLabel() { return currentLabel; }
+    public int secondsLeft() { return secondsLeft; }
+    public int totalSeconds() { return totalSeconds; }
 }

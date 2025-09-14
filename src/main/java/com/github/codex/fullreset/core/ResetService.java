@@ -4,6 +4,7 @@ import com.github.codex.fullreset.FullResetPlugin;
 import com.github.codex.fullreset.util.CountdownManager;
 import com.github.codex.fullreset.util.Messages;
 import com.github.codex.fullreset.util.MultiverseCompat;
+import com.github.codex.fullreset.util.ResetAuditLogger;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -36,6 +37,8 @@ public class ResetService {
     private final CountdownManager countdownManager;
     private final MultiverseCompat multiverseCompat;
 
+    private final ResetAuditLogger auditLogger = new ResetAuditLogger();
+
     public ResetService(FullResetPlugin plugin, ConfirmationManager confirmationManager, CountdownManager countdownManager, MultiverseCompat multiverseCompat) {
         this.plugin = plugin;
         this.confirmationManager = confirmationManager;
@@ -44,16 +47,48 @@ public class ResetService {
     }
 
     private volatile boolean resetInProgress = false;
+    private volatile String currentTarget = null;
+    private volatile String phase = "IDLE"; // IDLE, COUNTDOWN, RUNNING
 
     public void startResetWithCountdown(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt) {
         if (resetInProgress) {
             Messages.send(initiator, "&cA reset is already in progress. Please wait.");
             return;
         }
+        // Gate by online players threshold if configured
+        int maxOnline = plugin.getConfig().getInt("limits.maxOnlineForReset", -1);
+        if (maxOnline >= 0 && Bukkit.getOnlinePlayers().size() > maxOnline) {
+            Messages.send(initiator, "&cToo many players online to reset now (&e" + Bukkit.getOnlinePlayers().size() + "&c > &e" + maxOnline + "&c).");
+            return;
+        }
         int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
         Messages.send(initiator, "&eStarting reset countdown for &6" + baseWorldName + "&e...");
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            if (online.equals(initiator)) continue;
+            if (online.hasPermission("betterreset.notify")) {
+                Messages.send(online, "&e[BetterReset]&7 Countdown started for '&e" + baseWorldName + "&7'.");
+            }
+        }
         resetInProgress = true;
-        countdownManager.runCountdown(baseWorldName, seconds, () -> resetWorldAsync(initiator, baseWorldName, seedOpt));
+        currentTarget = baseWorldName;
+        phase = "COUNTDOWN";
+
+        // Decide audience
+        boolean broadcast = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
+        Set<Player> audience;
+        if (broadcast) {
+            audience = new java.util.HashSet<>(Bukkit.getOnlinePlayers());
+        } else {
+            // Only players in affected worlds
+            java.util.List<String> dims = dimensionNames(baseWorldName);
+            audience = new java.util.HashSet<>();
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                if (dims.contains(p.getWorld().getName())) audience.add(p);
+            }
+        }
+
+        auditLogger.log(plugin, "Countdown started by " + initiator.getName() + " for '" + baseWorldName + "' (seconds=" + seconds + ", seed=" + seedOpt.map(Object::toString).orElse("random") + ")");
+        countdownManager.runCountdown(baseWorldName, seconds, audience, () -> resetWorldAsync(initiator, baseWorldName, seedOpt));
     }
 
     public void resetWorldAsync(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt) {
@@ -71,11 +106,14 @@ public class ResetService {
         // Ensure we run Bukkit ops on main thread
         Bukkit.getScheduler().runTask(plugin, () -> {
             try {
+                phase = "RUNNING";
+                auditLogger.log(plugin, "Reset started for '" + worldBase + "'");
                 // Pick or create fallback world
                 World fallback = findOrCreateFallbackWorld(worldNames);
                 if (fallback == null) {
                     Messages.send(initiator, "&cFailed to find or create a fallback world; aborting.");
                     resetInProgress = false;
+                    phase = "IDLE";
                     return;
                 }
 
@@ -98,6 +136,7 @@ public class ResetService {
                         if (!ok) {
                             Messages.send(initiator, "&cFailed to unload world '&e" + name + "&c' — aborting.");
                             resetInProgress = false;
+                            phase = "IDLE";
                             return;
                         }
                     }
@@ -126,6 +165,8 @@ public class ResetService {
                             if (!finalDeletedAll) {
                                 Messages.send(initiator, "&cSome world folders could not be deleted. Aborting recreation.");
                                 resetInProgress = false;
+                                phase = "IDLE";
+                                auditLogger.log(plugin, "Reset failed for '" + worldBase + "' (delete phase)");
                                 return;
                             }
                             recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers);
@@ -134,12 +175,16 @@ public class ResetService {
                         Bukkit.getScheduler().runTask(plugin, () -> {
                             Messages.send(initiator, "&cUnexpected error while deleting worlds: " + ex.getMessage());
                             resetInProgress = false;
+                            phase = "IDLE";
+                            auditLogger.log(plugin, "Reset failed for '" + worldBase + "' (exception during delete): " + ex.getMessage());
                         });
                     }
                 });
             } catch (Exception ex) {
                 Messages.send(initiator, "&cError during reset: " + ex.getMessage());
                 resetInProgress = false;
+                phase = "IDLE";
+                auditLogger.log(plugin, "Reset failed for '" + worldBase + "' (exception): " + ex.getMessage());
             }
         });
     }
@@ -158,6 +203,8 @@ public class ResetService {
             if (overworld == null) {
                 Messages.send(initiator, "&cFailed to create overworld: " + base);
                 resetInProgress = false;
+                phase = "IDLE";
+                auditLogger.log(plugin, "Reset failed creating overworld for '" + base + "'");
                 return;
             }
             multiverseCompat.ensureRegistered(base, World.Environment.NORMAL, baseSeed);
@@ -172,6 +219,8 @@ public class ResetService {
             if (nether == null) {
                 Messages.send(initiator, "&cFailed to create nether: " + base + "_nether");
                 resetInProgress = false;
+                phase = "IDLE";
+                auditLogger.log(plugin, "Reset failed creating nether for '" + base + "'");
                 return;
             }
             multiverseCompat.ensureRegistered(base + "_nether", World.Environment.NETHER, netherSeed);
@@ -186,6 +235,8 @@ public class ResetService {
             if (theEnd == null) {
                 Messages.send(initiator, "&cFailed to create the_end: " + base + "_the_end");
                 resetInProgress = false;
+                phase = "IDLE";
+                auditLogger.log(plugin, "Reset failed creating the_end for '" + base + "'");
                 return;
             }
             multiverseCompat.ensureRegistered(base + "_the_end", World.Environment.THE_END, endSeed);
@@ -205,10 +256,22 @@ public class ResetService {
                     }
                 }
             }
+            Messages.send(initiator, "&aReset complete for '&e" + base + "&a'.");
+            // Notify others with notify permission
+            for (Player online : Bukkit.getOnlinePlayers()) {
+                if (online.equals(initiator)) continue;
+                if (online.hasPermission("betterreset.notify")) {
+                    Messages.send(online, "&a[BetterReset]&7 World '&e" + base + "&7' has been reset.");
+                }
+            }
+            auditLogger.log(plugin, "Reset completed for '" + base + "'");
             resetInProgress = false;
+            phase = "IDLE";
         } catch (Exception ex) {
             Messages.send(initiator, "&cError recreating worlds: " + ex.getMessage());
             resetInProgress = false;
+            phase = "IDLE";
+            auditLogger.log(plugin, "Reset failed (exception during create) for '" + base + "': " + ex.getMessage());
         }
     }
 
@@ -237,6 +300,14 @@ public class ResetService {
     }
 
     private World findOrCreateFallbackWorld(List<String> toAvoid) {
+        // If a configured fallback world exists, prefer it when it's not targeted
+        String configured = plugin.getConfig().getString("teleport.fallbackWorldName", "").trim();
+        if (!configured.isEmpty()) {
+            World cw = Bukkit.getWorld(configured);
+            if (cw != null && !toAvoid.contains(cw.getName())) {
+                return cw;
+            }
+        }
         for (World w : Bukkit.getWorlds()) {
             if (!toAvoid.contains(w.getName())) {
                 return w;
@@ -248,6 +319,25 @@ public class ResetService {
                 .environment(World.Environment.NORMAL)
                 .type(WorldType.NORMAL)
                 .createWorld();
+    }
+
+    public boolean cancelCountdown() {
+        boolean canceled = countdownManager.cancel();
+        if (canceled) {
+            resetInProgress = false;
+            phase = "IDLE";
+            auditLogger.log(plugin, "Countdown canceled for '" + currentTarget + "'");
+            currentTarget = null;
+        }
+        return canceled;
+    }
+
+    public String getStatusLine() {
+        if ("IDLE".equals(phase)) return "IDLE";
+        if ("COUNTDOWN".equals(phase)) {
+            return "COUNTDOWN '" + currentTarget + "' (" + countdownManager.secondsLeft() + "/" + countdownManager.totalSeconds() + ")";
+        }
+        return "RUNNING '" + currentTarget + "'";
     }
 
     private void safeTeleport(Player p, Location to) {

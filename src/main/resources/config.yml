@@ -23,3 +23,17 @@ messages:
 
 countdown:
   seconds: 10
+  # If true, show countdown titles/bossbar to all players. If false, only to players in affected dimensions.
+  broadcastToAll: true
+
+teleport:
+  # Name of a safe fallback world to send players before deletion. Leave blank to auto-pick/create.
+  fallbackWorldName: ""
+
+limits:
+  # Prevent resets if more than this many players are online (-1 to disable)
+  maxOnlineForReset: -1
+
+confirmation:
+  # If true, console commands skip confirmation
+  consoleBypasses: true

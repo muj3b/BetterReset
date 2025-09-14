@@ -50,6 +50,7 @@ public class FullResetCommand implements CommandExecutor, TabCompleter {
 
         String worldName = normalizeBase(args[0]);
         boolean confirm = false;
+        boolean force = false;
         Optional<Long> seed = Optional.empty();
 
         // Parse the rest of the arguments in any order
@@ -73,6 +74,8 @@ public class FullResetCommand implements CommandExecutor, TabCompleter {
                         return true;
                     }
                 }
+            } else if (a.equals("--force")) {
+                force = true;
             } else {
                 Messages.send(sender, "&cUnknown option: " + a);
                 return true;
@@ -84,7 +87,11 @@ public class FullResetCommand implements CommandExecutor, TabCompleter {
         long confirmWindowSec = plugin.getConfig().getLong("confirmation.timeoutSeconds", 15);
 
         String senderKey = ConfirmationManager.keyFor(sender);
-        if (!confirm && requireConfirm) {
+        boolean consoleBypass = !(sender instanceof Player) && plugin.getConfig().getBoolean("confirmation.consoleBypasses", true);
+        boolean permBypass = sender.hasPermission("betterreset.bypassconfirm");
+        boolean forceBypass = force && (consoleBypass || sender.hasPermission("betterreset.force"));
+
+        if (!confirm && requireConfirm && !consoleBypass && !permBypass && !forceBypass) {
             confirmationManager.createPending(senderKey, worldName, seed);
             String warn = plugin.getConfig().getString("messages.confirmationWarning",
                     "&c[WARNING] This will DELETE and REGENERATE &e%world% &coverworld, nether, and end while the server is running!");
@@ -99,7 +106,7 @@ public class FullResetCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        if (requireConfirm) {
+        if (requireConfirm && !consoleBypass && !permBypass && !forceBypass) {
             // Check/consume pending
             if (!confirmationManager.consumeIfValid(senderKey, worldName)) {
                 Messages.send(sender, "&cNo pending confirmation. Run the command once to see the warning then confirm.");
