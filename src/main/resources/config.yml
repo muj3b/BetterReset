@@ -1,4 +1,4 @@
-# FullReset configuration
+# BetterReset configuration
 
 confirmation:
   # Require a second, explicit confirmation before running a reset command

@@ -243,7 +243,7 @@ public class ResetService {
             }
         }
         // If all loaded worlds are being reset, create a temporary fallback world
-        String tmpName = "fullreset_safe_" + Instant.now().getEpochSecond();
+        String tmpName = "betterreset_safe_" + Instant.now().getEpochSecond();
         return new WorldCreator(tmpName)
                 .environment(World.Environment.NORMAL)
                 .type(WorldType.NORMAL)

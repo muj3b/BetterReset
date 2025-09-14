@@ -11,10 +11,10 @@ import com.github.codex.fullreset.util.MultiverseCompat;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * FullReset plugin entry.
+ * BetterReset plugin entry.
  *
  * Features:
- * - /fullreset <world> [confirm] [--seed <long>] to reset overworld, nether, and end.
+ * - /betterreset fullreset <world> [confirm] [--seed <long>] to reset overworld, nether, and end.
  * - Teleports players to a safe world before unload and optionally returns them after recreation.
  * - Async deletion of world folders; all Bukkit world calls run on the main thread.
  * - Optional seed specification; otherwise uses random seeds (configurable behavior for all dims).

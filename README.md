@@ -13,7 +13,7 @@ Requirements
 
 Install
 1. Build with `mvn package` and place `target/betterreset-1.0.0.jar` into your server's `plugins/` folder.
-2. Start the server to generate `plugins/FullReset/config.yml`.
+2. Start the server to generate `plugins/BetterReset/config.yml`.
 3. Adjust messages and behavior in `config.yml` as desired.
 
 Commands
