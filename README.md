@@ -17,7 +17,7 @@ Install
 3. Adjust messages and behavior in `config.yml` as desired.
 
 Commands
-- Root: `/betterreset <fullreset|gui|reload>`
+- Root: `/betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about>`
   - `/betterreset fullreset <world> [confirm|--confirm] [--seed <long>|--seed random]`
     - Permission: `betterreset.use` (default: OP)
   - Examples:
@@ -26,13 +26,21 @@ Commands
     - `/betterreset fullreset world --seed 12345 confirm` → use seed 12345 for all dimensions (configurable)
   - `/betterreset gui` → opens world selection and confirmation GUI (permission: `betterreset.gui`, default OP)
   - `/betterreset reload` → reloads config/messages (permission: `betterreset.reload`, default OP)
- - Legacy alias: `/fullreset ...` still works but prints a hint to use `/betterreset`.
+  - `/betterreset creator` → shows a clickable donation link (permission: `betterreset.creator`)
+  - `/betterreset status` → shows current reset status (permission: `betterreset.status`)
+  - `/betterreset cancel` → cancels an active countdown (permission: `betterreset.cancel`)
+  - `/betterreset fallback <world|none>` → sets fallback world (permission: `betterreset.fallback`)
+  - `/betterreset seedsame <true|false>` → toggles same-seed policy (permission: `betterreset.seedsame`)
+  - `/betterreset listworlds` → lists loaded base worlds (permission: `betterreset.listworlds`)
+  - `/betterreset about` → shows plugin version/author (permission: `betterreset.about`)
+- Legacy alias: `/fullreset ...` still works but prints a hint to use `/betterreset`.
 
 Behavior
 - Players in the target world's overworld, nether, or end are teleported to a safe fallback world.
 - The three dimensions are unloaded, then their folders are deleted asynchronously.
 - The overworld, nether, and end are recreated with new seeds.
 - Optionally, affected players are returned to the new overworld spawn (configurable).
+- Countdown can be canceled; status can be queried; display can be broadcast to all or just affected players.
 
 Multiverse-Core
 - The plugin does not require Multiverse-Core, but has a softdepend and avoids conflicts.
@@ -41,3 +49,4 @@ Multiverse-Core
 Notes
 - The plugin follows Bukkit best practices: all Bukkit calls on the main thread; heavy disk IO deletion is async.
 - Folder deletion is constrained to the server's world container for safety.
+- Confirmation can be bypassed by console or permissions; `--force` flag is supported for authorized users.
