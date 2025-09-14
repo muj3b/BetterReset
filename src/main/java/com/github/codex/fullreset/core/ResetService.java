@@ -405,6 +405,65 @@ public class ResetService {
         });
     }
 
+    public void restoreBackupAsync(CommandSender initiator, String base, String timestamp, EnumSet<Dimension> dims) {
+        if (resetInProgress) {
+            Messages.send(initiator, "&cA reset/restore is already in progress. Please wait.");
+            return;
+        }
+        resetInProgress = true;
+        phase = "RUNNING";
+        currentTarget = base;
+        List<String> worldNames = dimensionNames(base, dims);
+        // Teleport players in selected dimensions
+        Set<UUID> affected = new HashSet<>();
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (worldNames.contains(p.getWorld().getName())) affected.add(p.getUniqueId());
+        }
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            World fallback = findOrCreateFallbackWorld(worldNames);
+            if (fallback == null) {
+                Messages.send(initiator, "&cFailed to create fallback world; aborting restore.");
+                resetInProgress = false;
+                phase = "IDLE";
+                return;
+            }
+            for (UUID id : affected) {
+                Player p = Bukkit.getPlayer(id);
+                if (p != null && p.isOnline()) safeTeleport(p, fallback.getSpawnLocation());
+            }
+            for (String name : worldNames) {
+                World w = Bukkit.getWorld(name);
+                if (w != null) {
+                    try { w.save(); } catch (Exception ignored) {}
+                    Bukkit.unloadWorld(w, true);
+                }
+            }
+            CompletableFuture.runAsync(() -> {
+                try {
+                    backupManager.restore(base, timestamp, dims);
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        for (String name : worldNames) {
+                            File f = new File(Bukkit.getWorldContainer(), name);
+                            if (f.exists()) {
+                                World.Environment env = name.endsWith("_nether") ? World.Environment.NETHER : name.endsWith("_the_end") ? World.Environment.THE_END : World.Environment.NORMAL;
+                                new WorldCreator(name).environment(env).type(WorldType.NORMAL).createWorld();
+                            }
+                        }
+                        Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a' for " + dims + ".");
+                        resetInProgress = false;
+                        phase = "IDLE";
+                    });
+                } catch (Exception ex) {
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        Messages.send(initiator, "&cRestore failed: " + ex.getMessage());
+                        resetInProgress = false;
+                        phase = "IDLE";
+                    });
+                }
+            });
+        });
+    }
+
     private void safeTeleport(Player p, Location to) {
         try {
             // Use sync teleport for Spigot compatibility; Paper may optimize internally

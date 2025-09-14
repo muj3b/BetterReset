@@ -23,7 +23,7 @@ messages:
 
 countdown:
   seconds: 10
-  # If true, show countdown titles/bossbar to all players. If false, only to players in affected dimensions.
+  # If true, show countdown titles to all players. If false, only to players in affected dimensions.
   broadcastToAll: true
 
 teleport:
@@ -37,3 +37,11 @@ limits:
 confirmation:
   # If true, console commands skip confirmation
   consoleBypasses: true
+
+backups:
+  # Keep at most this many snapshots per base world (older are pruned)
+  maxPerBase: 5
+  # Keep at most this many snapshots total across all bases
+  maxTotal: 50
+  # Delete snapshots older than this many days
+  maxAgeDays: 30

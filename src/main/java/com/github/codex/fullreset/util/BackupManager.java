@@ -36,6 +36,7 @@ public class BackupManager {
             moveTree(src, dest);
         }
         plugin.getLogger().info("Snapshot saved: " + destBase);
+        prune(base);
         return stamp;
     }
 
@@ -70,8 +71,28 @@ public class BackupManager {
                     Path aside = backupsRoot.resolve(base).resolve("restore-aside-" + fmt.format(new Date()) + "-" + dest.getFileName());
                     moveTree(dest, aside);
                 }
-                moveTree(w, dest);
+                copyTree(w, dest);
             }
+        }
+    }
+
+    public void restore(String base, String timestamp, EnumSet<com.github.codex.fullreset.core.ResetService.Dimension> dims) throws IOException {
+        Path src = backupsRoot.resolve(base).resolve(timestamp);
+        if (!Files.exists(src) || !Files.isDirectory(src)) throw new IOException("Backup not found: " + src);
+        Path worldContainer = Bukkit.getWorldContainer().toPath().toAbsolutePath().normalize();
+        List<String> names = new ArrayList<>();
+        if (dims.contains(com.github.codex.fullreset.core.ResetService.Dimension.OVERWORLD)) names.add(base);
+        if (dims.contains(com.github.codex.fullreset.core.ResetService.Dimension.NETHER)) names.add(base + "_nether");
+        if (dims.contains(com.github.codex.fullreset.core.ResetService.Dimension.END)) names.add(base + "_the_end");
+        for (String name : names) {
+            Path srcWorld = src.resolve(name);
+            if (!Files.exists(srcWorld)) continue;
+            Path dest = worldContainer.resolve(name);
+            if (Files.exists(dest)) {
+                Path aside = backupsRoot.resolve(base).resolve("restore-aside-" + fmt.format(new Date()) + "-" + dest.getFileName());
+                moveTree(dest, aside);
+            }
+            copyTree(srcWorld, dest);
         }
     }
 
@@ -106,5 +127,89 @@ public class BackupManager {
             }
         });
     }
-}
 
+    private void copyTree(Path src, Path dest) throws IOException {
+        Files.createDirectories(dest);
+        Files.walkFileTree(src, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                Path rel = src.relativize(dir);
+                Files.createDirectories(dest.resolve(rel));
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Path rel = src.relativize(file);
+                Files.copy(file, dest.resolve(rel), StandardCopyOption.REPLACE_EXISTING);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    public void prune(String base) {
+        try {
+            int maxPerBase = plugin.getConfig().getInt("backups.maxPerBase", 5);
+            int maxTotal = plugin.getConfig().getInt("backups.maxTotal", 50);
+            int maxAge = plugin.getConfig().getInt("backups.maxAgeDays", 30);
+            long cutoff = System.currentTimeMillis() - (long) maxAge * 24L * 60L * 60L * 1000L;
+
+            // Per-base prune
+            Path baseDir = backupsRoot.resolve(base);
+            List<Path> timestamps = new ArrayList<>();
+            if (Files.exists(baseDir)) {
+                try (DirectoryStream<Path> ds = Files.newDirectoryStream(baseDir)) {
+                    for (Path p : ds) if (Files.isDirectory(p)) timestamps.add(p);
+                }
+            }
+            timestamps.sort(Comparator.comparing(Path::getFileName));
+            List<Path> toDelete = new ArrayList<>();
+            // Age-based
+            for (Path p : timestamps) {
+                Date d = parseTs(p.getFileName().toString());
+                if (d != null && d.getTime() < cutoff) toDelete.add(p);
+            }
+            // Count-based
+            int keep = Math.max(0, maxPerBase);
+            if (timestamps.size() - toDelete.size() > keep) {
+                int extra = (timestamps.size() - toDelete.size()) - keep;
+                for (int i = 0; i < timestamps.size() && extra > 0; i++) {
+                    Path p = timestamps.get(i);
+                    if (!toDelete.contains(p)) { toDelete.add(p); extra--; }
+                }
+            }
+            for (Path p : toDelete) deleteTree(p);
+
+            // Global cap
+            List<com.github.codex.fullreset.util.BackupManager.BackupRef> all = listBackups();
+            if (all.size() > maxTotal) {
+                int extra = all.size() - maxTotal;
+                for (int i = all.size() - 1; i >= 0 && extra > 0; i--) { // oldest at end due to reversed sort
+                    deleteTree(all.get(i).path());
+                    extra--;
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private Date parseTs(String ts) {
+        try { return fmt.parse(ts); } catch (Exception e) { return null; }
+    }
+
+    private void deleteTree(Path path) throws IOException {
+        if (!Files.exists(path)) return;
+        Files.walkFileTree(path, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.deleteIfExists(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.deleteIfExists(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+}

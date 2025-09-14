@@ -31,6 +31,7 @@ public class GuiManager implements Listener {
     private static final String TITLE_SELECT = ChatColor.DARK_GREEN + "Reset | Select World";
     private static final String TITLE_RESET_FOR = ChatColor.DARK_RED + "Reset | ";
     private static final String TITLE_BACKUPS = ChatColor.GOLD + "Backups";
+    private static final String TITLE_BACKUP_OPTIONS = ChatColor.DARK_PURPLE + "Restore | ";
 
     private final FullResetPlugin plugin;
     private final ResetService resetService;
@@ -104,6 +105,16 @@ public class GuiManager implements Listener {
         p.openInventory(inv);
     }
 
+    private void openBackupOptions(Player p, String base, String ts) {
+        Inventory inv = Bukkit.createInventory(p, 27, TITLE_BACKUP_OPTIONS + base + ChatColor.GRAY + " @ " + ts);
+        inv.setItem(10, named(Material.LIME_WOOL, ChatColor.GREEN + "Restore ALL"));
+        inv.setItem(12, named(Material.GRASS_BLOCK, ChatColor.WHITE + "Restore Overworld"));
+        inv.setItem(14, named(Material.NETHERRACK, ChatColor.WHITE + "Restore Nether"));
+        inv.setItem(16, named(Material.END_STONE, ChatColor.WHITE + "Restore End"));
+        inv.setItem(22, named(Material.ARROW, ChatColor.YELLOW + "Back"));
+        p.openInventory(inv);
+    }
+
     @EventHandler
     public void onClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player p)) return;
@@ -158,8 +169,23 @@ public class GuiManager implements Listener {
             if (parts.length == 2) {
                 String base = parts[0];
                 String ts = parts[1];
-                p.closeInventory();
-                resetService.restoreBackupAsync(p, base, ts);
+                openBackupOptions(p, base, ts);
+            }
+            return;
+        }
+        if (title.startsWith(TITLE_BACKUP_OPTIONS)) {
+            e.setCancelled(true);
+            String raw = ChatColor.stripColor(title.substring(TITLE_BACKUP_OPTIONS.length())); // base @ ts
+            String[] parts = raw.split(" @ ", 2);
+            if (parts.length != 2) { openBackups(p); return; }
+            String base = parts[0];
+            String ts = parts[1];
+            switch (dn) {
+                case "Back" -> openBackups(p);
+                case "Restore ALL" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts); }
+                case "Restore Overworld" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.OVERWORLD)); }
+                case "Restore Nether" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.NETHER)); }
+                case "Restore End" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.END)); }
             }
         }
     }
