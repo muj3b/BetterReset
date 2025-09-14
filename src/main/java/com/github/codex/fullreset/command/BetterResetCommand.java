@@ -88,7 +88,7 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, plugin.getConfig().getString("messages.noPermission"));
                     return true;
                 }
-                Messages.send(sender, "&7Status: &e" + pluginStatus());
+                Messages.send(sender, "&7Status: &e" + resetService.getStatusLine());
                 return true;
             case "cancel":
                 if (!sender.hasPermission("betterreset.cancel")) {
@@ -166,16 +166,6 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
             return Bukkit.getWorlds().stream().map(World::getName).filter(n -> n.toLowerCase(java.util.Locale.ROOT).startsWith(prefix)).collect(java.util.stream.Collectors.toList());
         }
         return Collections.emptyList();
-    }
-
-    private String pluginStatus() {
-        try {
-            java.lang.reflect.Method m = resetService.getClass().getMethod("getStatusLine");
-            Object s = m.invoke(resetService);
-            return String.valueOf(s);
-        } catch (Exception e) {
-            return "UNKNOWN";
-        }
     }
 
     private static String base(String input) {
