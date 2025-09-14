@@ -39,12 +39,12 @@ public class FullResetCommand implements CommandExecutor, TabCompleter {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (!(sender.hasPermission("betterreset.use") || sender.hasPermission("fullreset.use"))) {
-            sender.sendMessage(Messages.color(plugin.getConfig().getString("messages.noPermission")));
+            Messages.send(sender, plugin.getConfig().getString("messages.noPermission"));
             return true;
         }
 
         if (args.length < 1) {
-            sender.sendMessage(Messages.color("&cUsage: /" + label + " <world> [confirm|--confirm] [--seed <long>|--seed random]"));
+            Messages.send(sender, "&cUsage: /" + label + " <world> [confirm|--confirm] [--seed <long>|--seed random]");
             return true;
         }
 
@@ -59,7 +59,7 @@ public class FullResetCommand implements CommandExecutor, TabCompleter {
                 confirm = true;
             } else if (a.equals("--seed")) {
                 if (i + 1 >= args.length) {
-                    sender.sendMessage(Messages.color("&cMissing value for --seed. Use a long or 'random'."));
+                    Messages.send(sender, "&cMissing value for --seed. Use a long or 'random'.");
                     return true;
                 }
                 String seedStr = args[++i];
@@ -69,12 +69,12 @@ public class FullResetCommand implements CommandExecutor, TabCompleter {
                     try {
                         seed = Optional.of(Long.parseLong(seedStr));
                     } catch (NumberFormatException e) {
-                        sender.sendMessage(Messages.color("&cInvalid seed: " + seedStr));
+                        Messages.send(sender, "&cInvalid seed: " + seedStr);
                         return true;
                     }
                 }
             } else {
-                sender.sendMessage(Messages.color("&cUnknown option: " + a));
+                Messages.send(sender, "&cUnknown option: " + a);
                 return true;
             }
         }
@@ -94,15 +94,15 @@ public class FullResetCommand implements CommandExecutor, TabCompleter {
             howTo = howTo.replace("%world%", worldName)
                          .replace("%seconds%", String.valueOf(confirmWindowSec))
                          .replace("%label%", label);
-            sender.sendMessage(Messages.color(warn));
-            sender.sendMessage(Messages.color(howTo));
+            Messages.send(sender, warn);
+            Messages.send(sender, howTo);
             return true;
         }
 
         if (requireConfirm) {
             // Check/consume pending
             if (!confirmationManager.consumeIfValid(senderKey, worldName)) {
-                sender.sendMessage(Messages.color("&cNo pending confirmation. Run the command once to see the warning then confirm."));
+                Messages.send(sender, "&cNo pending confirmation. Run the command once to see the warning then confirm.");
                 return true;
             }
         }
