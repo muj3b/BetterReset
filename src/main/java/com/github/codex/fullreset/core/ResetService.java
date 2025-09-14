@@ -5,6 +5,7 @@ import com.github.codex.fullreset.util.CountdownManager;
 import com.github.codex.fullreset.util.Messages;
 import com.github.codex.fullreset.util.MultiverseCompat;
 import com.github.codex.fullreset.util.ResetAuditLogger;
+import com.github.codex.fullreset.util.BackupManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -36,6 +37,7 @@ public class ResetService {
     private final ConfirmationManager confirmationManager;
     private final CountdownManager countdownManager;
     private final MultiverseCompat multiverseCompat;
+    private final BackupManager backupManager;
 
     private final ResetAuditLogger auditLogger = new ResetAuditLogger();
 
@@ -44,6 +46,7 @@ public class ResetService {
         this.confirmationManager = confirmationManager;
         this.countdownManager = countdownManager;
         this.multiverseCompat = multiverseCompat;
+        this.backupManager = new BackupManager(plugin);
     }
 
     private volatile boolean resetInProgress = false;
@@ -51,6 +54,12 @@ public class ResetService {
     private volatile String phase = "IDLE"; // IDLE, COUNTDOWN, RUNNING
 
     public void startResetWithCountdown(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt) {
+        startResetWithCountdown(initiator, baseWorldName, seedOpt, EnumSet.of(Dimension.OVERWORLD, Dimension.NETHER, Dimension.END));
+    }
+
+    public enum Dimension { OVERWORLD, NETHER, END }
+
+    public void startResetWithCountdown(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt, EnumSet<Dimension> dims) {
         if (resetInProgress) {
             Messages.send(initiator, "&cA reset is already in progress. Please wait.");
             return;
@@ -80,20 +89,24 @@ public class ResetService {
             audience = new java.util.HashSet<>(Bukkit.getOnlinePlayers());
         } else {
             // Only players in affected worlds
-            java.util.List<String> dims = dimensionNames(baseWorldName);
+            java.util.List<String> dimsList = dimensionNames(baseWorldName, dims);
             audience = new java.util.HashSet<>();
             for (Player p : Bukkit.getOnlinePlayers()) {
-                if (dims.contains(p.getWorld().getName())) audience.add(p);
+                if (dimsList.contains(p.getWorld().getName())) audience.add(p);
             }
         }
 
-        auditLogger.log(plugin, "Countdown started by " + initiator.getName() + " for '" + baseWorldName + "' (seconds=" + seconds + ", seed=" + seedOpt.map(Object::toString).orElse("random") + ")");
-        countdownManager.runCountdown(baseWorldName, seconds, audience, () -> resetWorldAsync(initiator, baseWorldName, seedOpt));
+        auditLogger.log(plugin, "Countdown started by " + initiator.getName() + " for '" + baseWorldName + "' (seconds=" + seconds + ", seed=" + seedOpt.map(Object::toString).orElse("random") + ", dims=" + dims + ")");
+        countdownManager.runCountdown(baseWorldName, seconds, audience, () -> resetWorldAsync(initiator, baseWorldName, seedOpt, dims));
     }
 
     public void resetWorldAsync(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt) {
+        resetWorldAsync(initiator, baseWorldName, seedOpt, EnumSet.of(Dimension.OVERWORLD, Dimension.NETHER, Dimension.END));
+    }
+
+    public void resetWorldAsync(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt, EnumSet<Dimension> dims) {
         final String worldBase = baseWorldName;
-        final List<String> worldNames = dimensionNames(worldBase);
+        final List<String> worldNames = dimensionNames(worldBase, dims);
 
         // Capture current players in these worlds
         Set<UUID> affectedPlayers = new HashSet<>();
@@ -142,35 +155,13 @@ public class ResetService {
                     }
                 }
 
-                Messages.send(initiator, "&7Worlds unloaded. Deleting on disk asynchronously...");
+                Messages.send(initiator, "&7Worlds unloaded. Archiving backups and recreating...");
 
-                // Async delete
+                // Async snapshot (move) then recreate
                 CompletableFuture.runAsync(() -> {
                     try {
-                        boolean deletedAll = true;
-                        for (Map.Entry<String, Path> e : worldFolders.entrySet()) {
-                            String name = e.getKey();
-                            Path path = e.getValue();
-                            if (path == null) continue; // nothing to delete
-                            try {
-                                deletePath(path);
-                            } catch (IOException ex) {
-                                plugin.getLogger().warning("Failed to delete world folder '" + path + "': " + ex.getMessage());
-                                deletedAll = false;
-                            }
-                        }
-                        boolean finalDeletedAll = deletedAll;
-                        // Back to main thread to recreate worlds
-                        Bukkit.getScheduler().runTask(plugin, () -> {
-                            if (!finalDeletedAll) {
-                                Messages.send(initiator, "&cSome world folders could not be deleted. Aborting recreation.");
-                                resetInProgress = false;
-                                phase = "IDLE";
-                                auditLogger.log(plugin, "Reset failed for '" + worldBase + "' (delete phase)");
-                                return;
-                            }
-                            recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers);
-                        });
+                        backupManager.snapshot(worldBase, worldFolders);
+                        Bukkit.getScheduler().runTask(plugin, () -> recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers, dims));
                     } catch (Exception ex) {
                         Bukkit.getScheduler().runTask(plugin, () -> {
                             Messages.send(initiator, "&cUnexpected error while deleting worlds: " + ex.getMessage());
@@ -189,57 +180,62 @@ public class ResetService {
         });
     }
 
-    private void recreateWorlds(CommandSender initiator, String base, Optional<Long> seedOpt, Set<UUID> previouslyAffected) {
+    private void recreateWorlds(CommandSender initiator, String base, Optional<Long> seedOpt, Set<UUID> previouslyAffected, EnumSet<Dimension> dims) {
         try {
             boolean sameSeedForAll = plugin.getConfig().getBoolean("seeds.useSameSeedForAllDimensions", true);
             long baseSeed = seedOpt.orElseGet(() -> new Random().nextLong());
-
-            // Create overworld
-            World overworld = new WorldCreator(base)
-                    .seed(baseSeed)
-                    .environment(World.Environment.NORMAL)
-                    .type(WorldType.NORMAL)
-                    .createWorld();
-            if (overworld == null) {
-                Messages.send(initiator, "&cFailed to create overworld: " + base);
-                resetInProgress = false;
-                phase = "IDLE";
-                auditLogger.log(plugin, "Reset failed creating overworld for '" + base + "'");
-                return;
+            World overworld = null;
+            if (dims.contains(Dimension.OVERWORLD)) {
+                overworld = new WorldCreator(base)
+                        .seed(baseSeed)
+                        .environment(World.Environment.NORMAL)
+                        .type(WorldType.NORMAL)
+                        .createWorld();
+                if (overworld == null) {
+                    Messages.send(initiator, "&cFailed to create overworld: " + base);
+                    resetInProgress = false;
+                    phase = "IDLE";
+                    auditLogger.log(plugin, "Reset failed creating overworld for '" + base + "'");
+                    return;
+                }
+                multiverseCompat.ensureRegistered(base, World.Environment.NORMAL, baseSeed);
             }
-            multiverseCompat.ensureRegistered(base, World.Environment.NORMAL, baseSeed);
 
             // nether
             long netherSeed = sameSeedForAll ? baseSeed : new Random().nextLong();
-            World nether = new WorldCreator(base + "_nether")
-                    .seed(netherSeed)
-                    .environment(World.Environment.NETHER)
-                    .type(WorldType.NORMAL)
-                    .createWorld();
-            if (nether == null) {
-                Messages.send(initiator, "&cFailed to create nether: " + base + "_nether");
-                resetInProgress = false;
-                phase = "IDLE";
-                auditLogger.log(plugin, "Reset failed creating nether for '" + base + "'");
-                return;
+            if (dims.contains(Dimension.NETHER)) {
+                World nether = new WorldCreator(base + "_nether")
+                        .seed(netherSeed)
+                        .environment(World.Environment.NETHER)
+                        .type(WorldType.NORMAL)
+                        .createWorld();
+                if (nether == null) {
+                    Messages.send(initiator, "&cFailed to create nether: " + base + "_nether");
+                    resetInProgress = false;
+                    phase = "IDLE";
+                    auditLogger.log(plugin, "Reset failed creating nether for '" + base + "'");
+                    return;
+                }
+                multiverseCompat.ensureRegistered(base + "_nether", World.Environment.NETHER, netherSeed);
             }
-            multiverseCompat.ensureRegistered(base + "_nether", World.Environment.NETHER, netherSeed);
 
             // the end
             long endSeed = sameSeedForAll ? baseSeed : new Random().nextLong();
-            World theEnd = new WorldCreator(base + "_the_end")
-                    .seed(endSeed)
-                    .environment(World.Environment.THE_END)
-                    .type(WorldType.NORMAL)
-                    .createWorld();
-            if (theEnd == null) {
-                Messages.send(initiator, "&cFailed to create the_end: " + base + "_the_end");
-                resetInProgress = false;
-                phase = "IDLE";
-                auditLogger.log(plugin, "Reset failed creating the_end for '" + base + "'");
-                return;
+            if (dims.contains(Dimension.END)) {
+                World theEnd = new WorldCreator(base + "_the_end")
+                        .seed(endSeed)
+                        .environment(World.Environment.THE_END)
+                        .type(WorldType.NORMAL)
+                        .createWorld();
+                if (theEnd == null) {
+                    Messages.send(initiator, "&cFailed to create the_end: " + base + "_the_end");
+                    resetInProgress = false;
+                    phase = "IDLE";
+                    auditLogger.log(plugin, "Reset failed creating the_end for '" + base + "'");
+                    return;
+                }
+                multiverseCompat.ensureRegistered(base + "_the_end", World.Environment.THE_END, endSeed);
             }
-            multiverseCompat.ensureRegistered(base + "_the_end", World.Environment.THE_END, endSeed);
 
             // Optional: Multiverse compatibility – if present, it will typically detect loads via events.
             // We avoid a hard dependency to keep the plugin simple and portable.
@@ -247,7 +243,7 @@ public class ResetService {
             Messages.send(initiator, "&aRecreated worlds for '&e" + base + "&a' successfully.");
 
             boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
-            if (returnPlayers) {
+            if (returnPlayers && overworld != null) {
                 Location spawn = overworld.getSpawnLocation();
                 for (UUID id : previouslyAffected) {
                     Player p = Bukkit.getPlayer(id);
@@ -275,8 +271,12 @@ public class ResetService {
         }
     }
 
-    private static List<String> dimensionNames(String base) {
-        return Arrays.asList(base, base + "_nether", base + "_the_end");
+    private static List<String> dimensionNames(String base, EnumSet<Dimension> dims) {
+        List<String> list = new ArrayList<>();
+        if (dims.contains(Dimension.OVERWORLD)) list.add(base);
+        if (dims.contains(Dimension.NETHER)) list.add(base + "_nether");
+        if (dims.contains(Dimension.END)) list.add(base + "_the_end");
+        return list;
     }
 
     private Map<String, Path> resolveWorldFolders(List<String> worldNames) {
@@ -338,6 +338,71 @@ public class ResetService {
             return "COUNTDOWN '" + currentTarget + "' (" + countdownManager.secondsLeft() + "/" + countdownManager.totalSeconds() + ")";
         }
         return "RUNNING '" + currentTarget + "'";
+    }
+
+    public List<com.github.codex.fullreset.util.BackupManager.BackupRef> listBackups() {
+        return backupManager.listBackups();
+    }
+
+    public void restoreBackupAsync(CommandSender initiator, String base, String timestamp) {
+        if (resetInProgress) {
+            Messages.send(initiator, "&cA reset/restore is already in progress. Please wait.");
+            return;
+        }
+        resetInProgress = true;
+        phase = "RUNNING";
+        currentTarget = base;
+        List<String> worldNames = Arrays.asList(base, base + "_nether", base + "_the_end");
+        // Teleport any players in these worlds out
+        Set<UUID> affected = new HashSet<>();
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (worldNames.contains(p.getWorld().getName())) affected.add(p.getUniqueId());
+        }
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            World fallback = findOrCreateFallbackWorld(worldNames);
+            if (fallback == null) {
+                Messages.send(initiator, "&cFailed to create fallback world; aborting restore.");
+                resetInProgress = false;
+                phase = "IDLE";
+                return;
+            }
+            for (UUID id : affected) {
+                Player p = Bukkit.getPlayer(id);
+                if (p != null && p.isOnline()) safeTeleport(p, fallback.getSpawnLocation());
+            }
+            // Unload if loaded
+            for (String name : worldNames) {
+                World w = Bukkit.getWorld(name);
+                if (w != null) {
+                    try { w.save(); } catch (Exception ignored) {}
+                    Bukkit.unloadWorld(w, true);
+                }
+            }
+            CompletableFuture.runAsync(() -> {
+                try {
+                    backupManager.restore(base, timestamp);
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        // Load worlds if their folders exist
+                        for (String name : worldNames) {
+                            File f = new File(Bukkit.getWorldContainer(), name);
+                            if (f.exists()) {
+                                World.Environment env = name.endsWith("_nether") ? World.Environment.NETHER : name.endsWith("_the_end") ? World.Environment.THE_END : World.Environment.NORMAL;
+                                new WorldCreator(name).environment(env).type(WorldType.NORMAL).createWorld();
+                            }
+                        }
+                        Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a'.");
+                        resetInProgress = false;
+                        phase = "IDLE";
+                    });
+                } catch (Exception ex) {
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        Messages.send(initiator, "&cRestore failed: " + ex.getMessage());
+                        resetInProgress = false;
+                        phase = "IDLE";
+                    });
+                }
+            });
+        });
     }
 
     private void safeTeleport(Player p, Location to) {

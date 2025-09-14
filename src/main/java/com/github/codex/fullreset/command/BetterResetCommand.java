@@ -40,7 +40,15 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (args.length == 0) {
-            Messages.send(sender, "&eUsage: /" + label + " <fullreset|gui|reload> ...");
+            if (sender instanceof Player p) {
+                if (!sender.hasPermission("betterreset.gui")) {
+                    Messages.send(sender, plugin.getConfig().getString("messages.noPermission"));
+                    return true;
+                }
+                guiManager.openMain(p);
+                return true;
+            }
+            Messages.send(sender, "&eUsage: /" + label + " <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about>");
             return true;
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
@@ -58,7 +66,7 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, "&cGUI can only be used by a player.");
                     return true;
                 }
-                guiManager.openWorldSelect(p);
+                guiManager.openMain(p);
                 return true;
             case "reload":
                 if (!sender.hasPermission("betterreset.reload")) {
