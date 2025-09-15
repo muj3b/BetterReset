@@ -65,18 +65,11 @@ public class GuiManager implements Listener {
     }
 
     public void openWorldSelect(Player p) {
-        Inventory inv = Bukkit.createInventory(p, 54, TITLE_SELECT);
-        Set<String> bases = Bukkit.getWorlds().stream()
-                .map(World::getName)
-                .filter(n -> !n.startsWith("betterreset_safe_"))
-                .map(GuiManager::baseName)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        int slot = 0;
-        for (String base : bases) {
-            if (slot >= inv.getSize()) break;
-            inv.setItem(slot++, named(Material.GRASS_BLOCK, ChatColor.GREEN + base,
-                    ChatColor.GRAY + "Click to configure reset"));
-        }
+        Inventory inv = Bukkit.createInventory(p, 27, TITLE_SELECT);
+        String base = baseName(p.getWorld().getName());
+        inv.setItem(13, named(Material.GRASS_BLOCK, ChatColor.GREEN + base,
+                ChatColor.GRAY + "Click to configure reset"));
+        inv.setItem(22, named(Material.ARROW, ChatColor.YELLOW + "Back"));
         p.openInventory(inv);
     }
 
@@ -102,9 +95,17 @@ public class GuiManager implements Listener {
     private void openBackups(Player p) {
         Inventory inv = Bukkit.createInventory(p, 54, TITLE_BACKUPS);
         List<com.github.codex.fullreset.util.BackupManager.BackupRef> refs = resetService.listBackups();
-        int slot = 0;
+        // Header: per-base Delete ALL
+        LinkedHashSet<String> bases = new LinkedHashSet<>();
+        for (var r : refs) bases.add(r.base());
+        int hslot = 0;
+        for (String b : bases) {
+            if (hslot > 8) break;
+            inv.setItem(hslot++, named(Material.LAVA_BUCKET, ChatColor.DARK_RED + "Delete ALL " + b, ChatColor.GRAY + "Click to confirm"));
+        }
+        int slot = 9;
         for (var ref : refs) {
-            if (slot >= 53) break; // keep last slot for back
+            if (slot >= 48) break; // keep bottom row for controls
             String label = ChatColor.GOLD + ref.base() + ChatColor.GRAY + " @ " + ChatColor.YELLOW + ref.timestamp();
             List<String> lore = new ArrayList<>();
             lore.add(ChatColor.GRAY + "Click to restore");
@@ -112,22 +113,11 @@ public class GuiManager implements Listener {
             try (java.io.InputStream is = java.nio.file.Files.newInputStream(ref.path().resolve("meta.properties"))) { meta.load(is); } catch (Exception ignored) {}
             String sizeStr = meta.getProperty("sizeBytes");
             String play = meta.getProperty("playtimeSeconds");
-            if (sizeStr != null) {
-                try {
-                    long sz = Long.parseLong(sizeStr);
-                    lore.add(ChatColor.DARK_GRAY + "Size: " + human(sz));
-                } catch (NumberFormatException ignored) {}
-            }
-            if (play != null) {
-                try {
-                    long sec = Long.parseLong(play);
-                    lore.add(ChatColor.DARK_GRAY + "Playtime: " + formatDuration(sec));
-                } catch (NumberFormatException ignored) {}
-            }
+            if (sizeStr != null) { try { long sz = Long.parseLong(sizeStr); lore.add(ChatColor.DARK_GRAY + "Size: " + human(sz)); } catch (NumberFormatException ignored) {} }
+            if (play != null) { try { long sec = Long.parseLong(play); lore.add(ChatColor.DARK_GRAY + "Playtime: " + formatDuration(sec)); } catch (NumberFormatException ignored) {} }
             lore.add(ChatColor.DARK_GRAY + "ID:" + ref.base() + "|" + ref.timestamp());
             inv.setItem(slot++, named(Material.CHEST, label, lore.toArray(new String[0])));
         }
-        // Prune Now button and Back
         inv.setItem(49, named(Material.SHEARS, ChatColor.RED + "Prune Now"));
         inv.setItem(53, named(Material.ARROW, ChatColor.YELLOW + "Back"));
         p.openInventory(inv);
@@ -194,6 +184,7 @@ public class GuiManager implements Listener {
         }
         if (TITLE_SELECT.equals(title)) {
             e.setCancelled(true);
+            if (dn.equalsIgnoreCase("Back")) { openMain(p); return; }
             String base = ChatColor.stripColor(it.getItemMeta().getDisplayName());
             openResetOptions(p, base);
             return;
@@ -225,7 +216,13 @@ public class GuiManager implements Listener {
             if (dn.equalsIgnoreCase("Prune Now")) {
                 if (!p.hasPermission("betterreset.prune")) { Messages.send(p, plugin.getConfig().getString("messages.noPermission")); return; }
                 p.closeInventory();
-                resetService.pruneBackupsAsync(p, Optional.empty());
+                resetService.pruneBackupsAsync(p, Optional.empty(), true);
+                return;
+            }
+            if (dn.startsWith("Delete ALL ")) {
+                String base = dn.substring("Delete ALL ".length());
+                if (!p.hasPermission("betterreset.backups")) { Messages.send(p, plugin.getConfig().getString("messages.noPermission")); return; }
+                openDeleteAllConfirm(p, base);
                 return;
             }
             // Expect format: base @ timestamp
