@@ -204,6 +204,13 @@ public class BackupManager {
         deleteTree(dir);
     }
 
+    public void deleteAllBases() throws IOException {
+        if (!Files.exists(backupsRoot)) return;
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(backupsRoot)) {
+            for (Path p : ds) deleteTree(p);
+        }
+    }
+
     public int pruneAll() {
         int removed = 0;
         try {

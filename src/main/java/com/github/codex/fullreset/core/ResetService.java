@@ -571,6 +571,17 @@ public class ResetService {
         });
     }
 
+    public void deleteAllBackupsAsync(CommandSender initiator) {
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                backupManager.deleteAllBases();
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aDeleted ALL backups for ALL bases."));
+            } catch (Exception ex) {
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cDelete all failed: " + ex.getMessage()));
+            }
+        });
+    }
+
     public void testResetAsync(CommandSender initiator, String base, Optional<Long> seedOpt, EnumSet<Dimension> dims) {
         String testBase = ("brtest_" + base + "_" + System.currentTimeMillis());
         long seed = seedOpt.orElseGet(() -> new Random().nextLong());

@@ -163,6 +163,16 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, "&ePruning all backups as per config policy...");
                 }
                 return true;
+            case "deleteallbackups":
+                if (!sender.hasPermission("betterreset.backups")) { Messages.send(sender, plugin.getConfig().getString("messages.noPermission")); return true; }
+                if (args.length >= 2) {
+                    resetService.deleteAllBackupsForBaseAsync(sender, args[1]);
+                    Messages.send(sender, "&cDeleting ALL backups for '&6" + args[1] + "&c'...");
+                } else {
+                    resetService.deleteAllBackupsAsync(sender);
+                    Messages.send(sender, "&cDeleting ALL backups for ALL bases...");
+                }
+                return true;
             case "preload":
                 if (!sender.hasPermission("betterreset.preload")) { Messages.send(sender, plugin.getConfig().getString("messages.noPermission")); return true; }
                 if (args.length == 1 || args[1].equalsIgnoreCase("status")) {
@@ -201,7 +211,7 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            List<String> subs = Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune","preload","testreset");
+            List<String> subs = Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune","deleteallbackups","preload","testreset");
             return subs.stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
         }
         if (args.length >= 2 && args[0].equalsIgnoreCase("fullreset")) {
@@ -225,6 +235,15 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                 for (var r : refs) suggestions.add(r.base());
             } catch (Exception ignored) {}
             String pre = args[1].toLowerCase(java.util.Locale.ROOT);
+            return suggestions.stream().filter(s -> s.toLowerCase(java.util.Locale.ROOT).startsWith(pre)).collect(java.util.stream.Collectors.toList());
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("deleteallbackups")) {
+            String pre = args[1].toLowerCase(java.util.Locale.ROOT);
+            java.util.Set<String> suggestions = new java.util.LinkedHashSet<>();
+            try {
+                java.util.List<com.github.codex.fullreset.util.BackupManager.BackupRef> refs = resetService.listBackups();
+                for (var r : refs) suggestions.add(r.base());
+            } catch (Exception ignored) {}
             return suggestions.stream().filter(s -> s.toLowerCase(java.util.Locale.ROOT).startsWith(pre)).collect(java.util.stream.Collectors.toList());
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("fallback")) {

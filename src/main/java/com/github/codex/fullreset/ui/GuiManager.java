@@ -9,6 +9,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
@@ -50,7 +51,7 @@ public class GuiManager implements Listener {
     }
 
     public void openMain(Player p) {
-        Inventory inv = Bukkit.createInventory(p, 27, TITLE_MAIN);
+        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.MAIN), 27, TITLE_MAIN);
         // Reset Worlds button
         inv.setItem(11, named(Material.GRASS_BLOCK, ChatColor.GREEN + "Reset Worlds",
                 ChatColor.GRAY + "Pick a world and choose",
@@ -65,7 +66,7 @@ public class GuiManager implements Listener {
     }
 
     public void openWorldSelect(Player p) {
-        Inventory inv = Bukkit.createInventory(p, 27, TITLE_SELECT);
+        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.SELECT), 27, TITLE_SELECT);
         String base = baseName(p.getWorld().getName());
         inv.setItem(13, named(Material.GRASS_BLOCK, ChatColor.GREEN + base,
                 ChatColor.GRAY + "Click to configure reset"));
@@ -78,7 +79,7 @@ public class GuiManager implements Listener {
         selectedDims.putIfAbsent(p.getUniqueId(), EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END));
         EnumSet<ResetService.Dimension> dims = selectedDims.get(p.getUniqueId());
 
-        Inventory inv = Bukkit.createInventory(p, 45, TITLE_RESET_FOR + base);
+        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.RESET_OPTIONS), 45, TITLE_RESET_FOR + base);
         // Toggles
         inv.setItem(10, toggleItem(dims.contains(ResetService.Dimension.OVERWORLD), Material.GRASS_BLOCK, "Overworld"));
         inv.setItem(12, toggleItem(dims.contains(ResetService.Dimension.NETHER), Material.NETHERRACK, "Nether"));
@@ -93,7 +94,7 @@ public class GuiManager implements Listener {
     }
 
     private void openBackups(Player p) {
-        Inventory inv = Bukkit.createInventory(p, 54, TITLE_BACKUPS);
+        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.BACKUPS), 54, TITLE_BACKUPS);
         List<com.github.codex.fullreset.util.BackupManager.BackupRef> refs = resetService.listBackups();
         // Header: per-base Delete ALL
         LinkedHashSet<String> bases = new LinkedHashSet<>();
@@ -124,7 +125,7 @@ public class GuiManager implements Listener {
     }
 
     private void openBackupOptions(Player p, String base, String ts) {
-        Inventory inv = Bukkit.createInventory(p, 27, TITLE_BACKUP_OPTIONS + base + ChatColor.GRAY + " @ " + ts);
+        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.BACKUP_OPTIONS), 27, TITLE_BACKUP_OPTIONS + base + ChatColor.GRAY + " @ " + ts);
         inv.setItem(10, named(Material.LIME_WOOL, ChatColor.GREEN + "Restore ALL"));
         inv.setItem(12, named(Material.GRASS_BLOCK, ChatColor.WHITE + "Restore Overworld"));
         inv.setItem(14, named(Material.NETHERRACK, ChatColor.WHITE + "Restore Nether"));
@@ -135,22 +136,23 @@ public class GuiManager implements Listener {
     }
 
     private void openDeleteConfirm(Player p, String base, String ts) {
-        Inventory inv = Bukkit.createInventory(p, 27, TITLE_DELETE_BACKUP + base + ChatColor.GRAY + " @ " + ts);
+        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.DELETE_BACKUP), 27, TITLE_DELETE_BACKUP + base + ChatColor.GRAY + " @ " + ts);
         inv.setItem(11, named(Material.RED_CONCRETE, ChatColor.DARK_RED + "Confirm Delete"));
         inv.setItem(15, named(Material.ARROW, ChatColor.YELLOW + "Cancel"));
         p.openInventory(inv);
     }
 
     private void openDeleteAllConfirm(Player p, String base) {
-        Inventory inv = Bukkit.createInventory(p, 27, ChatColor.DARK_RED + "Delete ALL | " + base);
+        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.DELETE_ALL), 27, ChatColor.DARK_RED + "Delete ALL | " + base);
         inv.setItem(11, named(Material.RED_CONCRETE, ChatColor.DARK_RED + "Confirm Delete All"));
         inv.setItem(15, named(Material.ARROW, ChatColor.YELLOW + "Cancel"));
         p.openInventory(inv);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player p)) return;
+        if (!(e.getView().getTopInventory().getHolder() instanceof GuiHolder)) return;
         String title = e.getView().getTitle();
         if (title == null) return;
         ItemStack it = e.getCurrentItem();
