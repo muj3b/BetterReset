@@ -28,14 +28,29 @@ public class BackupManager {
         String stamp = fmt.format(new Date());
         Path destBase = backupsRoot.resolve(base).resolve(stamp);
         Files.createDirectories(destBase);
+        long totalBytes = 0L;
         for (Map.Entry<String, Path> e : worldFolders.entrySet()) {
             String worldName = e.getKey();
             Path src = e.getValue();
             if (src == null || !Files.exists(src)) continue;
             Path dest = destBase.resolve(src.getFileName());
             moveTree(src, dest);
+            totalBytes += folderSize(dest);
         }
-        plugin.getLogger().info("Snapshot saved: " + destBase);
+        // Write metadata
+        try {
+            java.util.Properties meta = new java.util.Properties();
+            meta.setProperty("base", base);
+            meta.setProperty("timestamp", stamp);
+            meta.setProperty("sizeBytes", String.valueOf(totalBytes));
+            long playtime = 0L;
+            try { playtime = plugin.getPlaytimeTracker().getSecondsForBase(base); } catch (Throwable ignored) {}
+            meta.setProperty("playtimeSeconds", String.valueOf(playtime));
+            try (java.io.OutputStream os = java.nio.file.Files.newOutputStream(destBase.resolve("meta.properties"))) {
+                meta.store(os, "BetterReset backup metadata");
+            }
+        } catch (Exception ignored) {}
+        plugin.getLogger().info("Snapshot saved: " + destBase + " (" + human(totalBytes) + ")");
         prune(base);
         return stamp;
     }
@@ -126,6 +141,38 @@ public class BackupManager {
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+
+    private long folderSize(Path path) throws IOException {
+        final long[] size = {0};
+        if (!Files.exists(path)) return 0L;
+        Files.walkFileTree(path, new SimpleFileVisitor<>() {
+            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException { size[0] += Files.size(file); return FileVisitResult.CONTINUE; }
+        });
+        return size[0];
+    }
+
+    private String human(long bytes) {
+        String[] u = {"B","KB","MB","GB","TB"};
+        double b = bytes; int i=0; while (b>=1024 && i<u.length-1){ b/=1024; i++; }
+        return String.format(java.util.Locale.US, "%.1f %s", b, u[i]);
+    }
+
+    public void pruneKeepPerBase(String base, int keep) throws IOException {
+        Path baseDir = backupsRoot.resolve(base);
+        if (!Files.exists(baseDir)) return;
+        List<Path> timestamps = new ArrayList<>();
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(baseDir)) { for (Path p : ds) if (Files.isDirectory(p)) timestamps.add(p); }
+        timestamps.sort(Comparator.comparing(Path::getFileName)); // oldest first
+        int toRemove = Math.max(0, timestamps.size() - keep);
+        for (int i = 0; i < toRemove; i++) deleteTree(timestamps.get(i));
+    }
+
+    public void pruneKeepAllBases(int keep) throws IOException {
+        if (!Files.exists(backupsRoot)) return;
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(backupsRoot)) {
+            for (Path base : ds) if (Files.isDirectory(base)) pruneKeepPerBase(base.getFileName().toString(), keep);
+        }
     }
 
     private void copyTree(Path src, Path dest) throws IOException {

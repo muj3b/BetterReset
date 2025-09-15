@@ -10,6 +10,7 @@ import com.github.codex.fullreset.util.MultiverseCompat;
 import org.bukkit.plugin.java.JavaPlugin;
 import com.github.codex.fullreset.util.RespawnManager;
 import com.github.codex.fullreset.util.PreloadManager;
+import com.github.codex.fullreset.util.PlaytimeTracker;
 
 /**
  * BetterReset plugin entry.
@@ -32,6 +33,7 @@ public final class FullResetPlugin extends JavaPlugin {
     private MultiverseCompat multiverseCompat;
     private RespawnManager respawnManager;
     private PreloadManager preloadManager;
+    private PlaytimeTracker playtimeTracker;
 
     @Override
     public void onEnable() {
@@ -45,6 +47,7 @@ public final class FullResetPlugin extends JavaPlugin {
         this.resetService = new ResetService(this, confirmationManager, countdownManager, multiverseCompat, preloadManager);
         this.guiManager = new GuiManager(this, resetService);
         this.respawnManager = new RespawnManager(this);
+        this.playtimeTracker = new PlaytimeTracker(this);
 
         // Register commands
         BetterResetCommand root = new BetterResetCommand(this, resetService, confirmationManager, guiManager);
@@ -67,4 +70,6 @@ public final class FullResetPlugin extends JavaPlugin {
     public RespawnManager getRespawnManager() {
         return respawnManager;
     }
+
+    public PlaytimeTracker getPlaytimeTracker() { return playtimeTracker; }
 }

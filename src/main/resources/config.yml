@@ -17,6 +17,8 @@ players:
   forceRespawnToNewOverworld: true
   # How long after a reset to enforce respawn override (seconds)
   respawnRecentWindowSeconds: 600
+  # Clear inventories, XP, hunger, health when moved into the fresh world
+  freshStartOnReset: true
 
 messages:
   noPermission: "&cYou don't have permission to use this command."
@@ -55,3 +57,5 @@ backups:
   maxTotal: 50
   # Delete snapshots older than this many days
   maxAgeDays: 30
+  # When clicking "Prune Now" in GUI, keep at most this many per base (force policy)
+  pruneNowKeepPerBase: 2

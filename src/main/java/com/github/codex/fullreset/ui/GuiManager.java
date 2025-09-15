@@ -101,7 +101,26 @@ public class GuiManager implements Listener {
         for (var ref : refs) {
             if (slot >= 53) break; // keep last slot for back
             String label = ChatColor.GOLD + ref.base() + ChatColor.GRAY + " @ " + ChatColor.YELLOW + ref.timestamp();
-            inv.setItem(slot++, named(Material.CHEST, label, ChatColor.GRAY + "Click to restore", ChatColor.DARK_GRAY + "ID:" + ref.base() + "|" + ref.timestamp()));
+            List<String> lore = new ArrayList<>();
+            lore.add(ChatColor.GRAY + "Click to restore");
+            java.util.Properties meta = new java.util.Properties();
+            try (java.io.InputStream is = java.nio.file.Files.newInputStream(ref.path().resolve("meta.properties"))) { meta.load(is); } catch (Exception ignored) {}
+            String sizeStr = meta.getProperty("sizeBytes");
+            String play = meta.getProperty("playtimeSeconds");
+            if (sizeStr != null) {
+                try {
+                    long sz = Long.parseLong(sizeStr);
+                    lore.add(ChatColor.DARK_GRAY + "Size: " + human(sz));
+                } catch (NumberFormatException ignored) {}
+            }
+            if (play != null) {
+                try {
+                    long sec = Long.parseLong(play);
+                    lore.add(ChatColor.DARK_GRAY + "Playtime: " + formatDuration(sec));
+                } catch (NumberFormatException ignored) {}
+            }
+            lore.add(ChatColor.DARK_GRAY + "ID:" + ref.base() + "|" + ref.timestamp());
+            inv.setItem(slot++, named(Material.CHEST, label, lore.toArray(new String[0])));
         }
         // Prune Now button and Back
         inv.setItem(49, named(Material.SHEARS, ChatColor.RED + "Prune Now"));
@@ -299,6 +318,19 @@ public class GuiManager implements Listener {
         if (lore != null && lore.length > 0) m.setLore(Arrays.asList(lore));
         it.setItemMeta(m);
         return it;
+    }
+
+    private static String human(long bytes) {
+        String[] u = {"B","KB","MB","GB","TB"};
+        double b = bytes; int i=0; while (b>=1024 && i<u.length-1){ b/=1024; i++; }
+        return String.format(java.util.Locale.US, "%.1f %s", b, u[i]);
+    }
+
+    private static String formatDuration(long sec) {
+        long h = sec/3600; long m = (sec%3600)/60; long s = sec%60;
+        if (h>0) return String.format(java.util.Locale.US, "%dh %dm", h, m);
+        if (m>0) return String.format(java.util.Locale.US, "%dm %ds", m, s);
+        return s + "s";
     }
 
     private static String baseName(String input) {

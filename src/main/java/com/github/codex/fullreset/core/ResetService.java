@@ -281,6 +281,7 @@ public class ResetService {
                     Player p = Bukkit.getPlayer(id);
                     if (p != null && p.isOnline()) {
                         safeTeleport(p, spawn);
+                        applyFreshStartIfEnabled(p);
                     }
                 }
             }
@@ -532,6 +533,20 @@ public class ResetService {
         });
     }
 
+    public void pruneBackupsAsync(CommandSender initiator, Optional<String> baseOpt, boolean forceKeepPolicy) {
+        if (!forceKeepPolicy) { pruneBackupsAsync(initiator, baseOpt); return; }
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                int keep = plugin.getConfig().getInt("backups.pruneNowKeepPerBase", 2);
+                if (baseOpt.isPresent()) backupManager.pruneKeepPerBase(baseOpt.get(), keep);
+                else backupManager.pruneKeepAllBases(keep);
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aPrune complete. Kept at most " + keep + " per base."));
+            } catch (Exception ex) {
+                Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cPrune failed: " + ex.getMessage()));
+            }
+        });
+    }
+
     public void deleteAllBackupsForBaseAsync(CommandSender initiator, String base) {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
@@ -587,6 +602,24 @@ public class ResetService {
             p.teleport(to);
         } catch (Exception ignored) {
         }
+    }
+
+    private void applyFreshStartIfEnabled(Player p) {
+        if (!plugin.getConfig().getBoolean("players.freshStartOnReset", true)) return;
+        try {
+            p.getInventory().clear();
+            p.getEnderChest().clear();
+            p.setFireTicks(0);
+            p.setHealth(Math.min(p.getMaxHealth(), 20.0));
+            p.setFoodLevel(20);
+            p.setSaturation(5f);
+            p.setExhaustion(0f);
+            p.setLevel(0);
+            p.setExp(0f);
+            p.setTotalExperience(0);
+            p.setFallDistance(0f);
+            p.setRemainingAir(p.getMaximumAir());
+        } catch (Exception ignored) {}
     }
 
     private void deletePath(Path path) throws IOException {
