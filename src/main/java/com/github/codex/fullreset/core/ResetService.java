@@ -543,6 +543,44 @@ public class ResetService {
         });
     }
 
+    public void testResetAsync(CommandSender initiator, String base, Optional<Long> seedOpt, EnumSet<Dimension> dims) {
+        String testBase = ("brtest_" + base + "_" + System.currentTimeMillis());
+        long seed = seedOpt.orElseGet(() -> new Random().nextLong());
+        Messages.send(initiator, "&7Starting test reset for '&e" + base + "&7' → temp '&e" + testBase + "&7'.");
+        long t0 = System.nanoTime();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            try {
+                // Create temp worlds
+                for (String name : dimensionNames(testBase, dims)) {
+                    World.Environment env = name.endsWith("_nether") ? World.Environment.NETHER : name.endsWith("_the_end") ? World.Environment.THE_END : World.Environment.NORMAL;
+                    World w = new WorldCreator(name).environment(env).seed(seed).type(WorldType.NORMAL).createWorld();
+                    if (w != null) try { w.getChunkAt(w.getSpawnLocation()).load(true);} catch (Exception ignored) {}
+                }
+                long tCreate = System.nanoTime();
+                Messages.send(initiator, "&aCreated temp worlds in &e" + ((tCreate - t0)/1_000_000) + "ms.");
+                // Unload and delete temp worlds
+                for (String name : dimensionNames(testBase, dims)) {
+                    World w = Bukkit.getWorld(name);
+                    if (w != null) Bukkit.unloadWorld(w, true);
+                }
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        for (String name : dimensionNames(testBase, dims)) {
+                            File f = new File(Bukkit.getWorldContainer(), name);
+                            if (f.exists()) deletePath(f.toPath());
+                        }
+                        long tEnd = System.nanoTime();
+                        Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aCleanup complete. Total test time: &e" + ((tEnd - t0)/1_000_000) + "ms"));
+                    } catch (Exception ex) {
+                        Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cTest cleanup failed: " + ex.getMessage()));
+                    }
+                });
+            } catch (Exception ex) {
+                Messages.send(initiator, "&cTest reset failed: " + ex.getMessage());
+            }
+        });
+    }
+
     private void safeTeleport(Player p, Location to) {
         try {
             // Use sync teleport for Spigot compatibility; Paper may optimize internally

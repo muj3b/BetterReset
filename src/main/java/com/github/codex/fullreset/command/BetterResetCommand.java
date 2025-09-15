@@ -163,6 +163,35 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, "&ePruning all backups as per config policy...");
                 }
                 return true;
+            case "preload":
+                if (!sender.hasPermission("betterreset.preload")) { Messages.send(sender, plugin.getConfig().getString("messages.noPermission")); return true; }
+                if (args.length == 1 || args[1].equalsIgnoreCase("status")) {
+                    boolean en = plugin.getConfig().getBoolean("preload.enabled", true);
+                    Messages.send(sender, "&7Preload is &e" + (en?"ON":"OFF"));
+                    return true;
+                }
+                if (args[1].equalsIgnoreCase("on") || args[1].equalsIgnoreCase("off")) {
+                    boolean pval = args[1].equalsIgnoreCase("on");
+                    plugin.getConfig().set("preload.enabled", pval);
+                    plugin.saveConfig();
+                    Messages.send(sender, "&aPreload set to &e" + pval);
+                    return true;
+                }
+                Messages.send(sender, "&eUsage: /" + label + " preload <on|off|status>");
+                return true;
+            case "testreset":
+                if (!sender.hasPermission("betterreset.test")) { Messages.send(sender, plugin.getConfig().getString("messages.noPermission")); return true; }
+                if (args.length < 2) { Messages.send(sender, "&eUsage: /" + label + " testreset <base> [--seed <long>]"); return true; }
+                String baseArg = args[1];
+                Optional<Long> seed = Optional.empty();
+                for (int i = 2; i < args.length; i++) {
+                    if (args[i].equalsIgnoreCase("--seed") && i + 1 < args.length) {
+                        try { seed = Optional.of(Long.parseLong(args[++i])); }
+                        catch (NumberFormatException ex) { Messages.send(sender, "&cInvalid seed."); return true; }
+                    }
+                }
+                resetService.testResetAsync(sender, baseArg, seed, EnumSet.of(com.github.codex.fullreset.core.ResetService.Dimension.OVERWORLD, com.github.codex.fullreset.core.ResetService.Dimension.NETHER, com.github.codex.fullreset.core.ResetService.Dimension.END));
+                return true;
             default:
                 Messages.send(sender, "&cUnknown subcommand. Use &e/" + label + " <fullreset|gui|reload>");
                 return true;
@@ -172,16 +201,21 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            return Arrays.asList("fullreset", "gui", "reload").stream()
-                    .filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT)))
-                    .collect(Collectors.toList());
+            List<String> subs = Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune","preload","testreset");
+            return subs.stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
         }
         if (args.length >= 2 && args[0].equalsIgnoreCase("fullreset")) {
             // Delegate to underlying completer for world names and flags
             String[] shifted = Arrays.copyOfRange(args, 1, args.length);
             return delegate.onTabComplete(sender, command, alias, shifted);
         }
-        if (args.length == 1) return java.util.Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune");
+        if (args.length == 2 && args[0].equalsIgnoreCase("preload")) {
+            return java.util.Arrays.asList("on","off","status");
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("testreset")) {
+            String prefix = args[1].toLowerCase(java.util.Locale.ROOT);
+            return Bukkit.getWorlds().stream().map(World::getName).map(BetterResetCommand::base).distinct().filter(n -> n.toLowerCase(java.util.Locale.ROOT).startsWith(prefix)).collect(java.util.stream.Collectors.toList());
+        }
         if (args.length == 2 && args[0].equalsIgnoreCase("prune")) {
             // Suggest known bases from loaded worlds and backup list
             java.util.Set<String> suggestions = new java.util.LinkedHashSet<>();
