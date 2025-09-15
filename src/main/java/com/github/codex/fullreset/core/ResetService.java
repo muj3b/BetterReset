@@ -101,12 +101,25 @@ public class ResetService {
 
         long chosenSeed = seedOpt.orElseGet(() -> new Random().nextLong());
         auditLogger.log(plugin, "Countdown started by " + initiator.getName() + " for '" + baseWorldName + "' (seconds=" + seconds + ", seed=" + chosenSeed + ", dims=" + dims + ")");
-        // Preload temporary worlds during countdown
-        EnumSet<com.github.codex.fullreset.util.PreloadManager.Dimension> preloadDims = EnumSet.noneOf(com.github.codex.fullreset.util.PreloadManager.Dimension.class);
-        if (dims.contains(Dimension.OVERWORLD)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.OVERWORLD);
-        if (dims.contains(Dimension.NETHER)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.NETHER);
-        if (dims.contains(Dimension.END)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.END);
-        preloadManager.preload(baseWorldName, chosenSeed, preloadDims);
+        boolean preloadEnabled = plugin.getConfig().getBoolean("preload.enabled", true);
+        boolean auto = plugin.getConfig().getBoolean("preload.autoDisableHighLag", true);
+        double threshold = plugin.getConfig().getDouble("preload.tpsThreshold", 18.0);
+        if (preloadEnabled) {
+            boolean shouldPreload = true;
+            if (auto) {
+                try {
+                    double[] tps = (double[]) Bukkit.getServer().getClass().getMethod("getTPS").invoke(Bukkit.getServer());
+                    if (tps != null && tps.length > 0 && tps[0] < threshold) shouldPreload = false;
+                } catch (Throwable ignored) { /* Not Paper or method missing */ }
+            }
+            if (shouldPreload) {
+                EnumSet<com.github.codex.fullreset.util.PreloadManager.Dimension> preloadDims = EnumSet.noneOf(com.github.codex.fullreset.util.PreloadManager.Dimension.class);
+                if (dims.contains(Dimension.OVERWORLD)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.OVERWORLD);
+                if (dims.contains(Dimension.NETHER)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.NETHER);
+                if (dims.contains(Dimension.END)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.END);
+                preloadManager.preload(baseWorldName, chosenSeed, preloadDims);
+            }
+        }
         countdownManager.runCountdown(baseWorldName, seconds, audience, () -> resetWorldAsync(initiator, baseWorldName, Optional.of(chosenSeed), dims));
     }
 
