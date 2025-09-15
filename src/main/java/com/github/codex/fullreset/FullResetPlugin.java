@@ -9,6 +9,7 @@ import com.github.codex.fullreset.util.CountdownManager;
 import com.github.codex.fullreset.util.MultiverseCompat;
 import org.bukkit.plugin.java.JavaPlugin;
 import com.github.codex.fullreset.util.RespawnManager;
+import com.github.codex.fullreset.util.PreloadManager;
 
 /**
  * BetterReset plugin entry.
@@ -30,6 +31,7 @@ public final class FullResetPlugin extends JavaPlugin {
     private CountdownManager countdownManager;
     private MultiverseCompat multiverseCompat;
     private RespawnManager respawnManager;
+    private PreloadManager preloadManager;
 
     @Override
     public void onEnable() {
@@ -39,7 +41,8 @@ public final class FullResetPlugin extends JavaPlugin {
         this.confirmationManager = new ConfirmationManager(this);
         this.countdownManager = new CountdownManager(this);
         this.multiverseCompat = new MultiverseCompat(this);
-        this.resetService = new ResetService(this, confirmationManager, countdownManager, multiverseCompat);
+        this.preloadManager = new PreloadManager(this);
+        this.resetService = new ResetService(this, confirmationManager, countdownManager, multiverseCompat, preloadManager);
         this.guiManager = new GuiManager(this, resetService);
         this.respawnManager = new RespawnManager(this);
 

@@ -6,6 +6,7 @@ import com.github.codex.fullreset.util.Messages;
 import com.github.codex.fullreset.util.MultiverseCompat;
 import com.github.codex.fullreset.util.ResetAuditLogger;
 import com.github.codex.fullreset.util.BackupManager;
+import com.github.codex.fullreset.util.PreloadManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -38,15 +39,17 @@ public class ResetService {
     private final CountdownManager countdownManager;
     private final MultiverseCompat multiverseCompat;
     private final BackupManager backupManager;
+    private final PreloadManager preloadManager;
 
     private final ResetAuditLogger auditLogger = new ResetAuditLogger();
 
-    public ResetService(FullResetPlugin plugin, ConfirmationManager confirmationManager, CountdownManager countdownManager, MultiverseCompat multiverseCompat) {
+    public ResetService(FullResetPlugin plugin, ConfirmationManager confirmationManager, CountdownManager countdownManager, MultiverseCompat multiverseCompat, PreloadManager preloadManager) {
         this.plugin = plugin;
         this.confirmationManager = confirmationManager;
         this.countdownManager = countdownManager;
         this.multiverseCompat = multiverseCompat;
         this.backupManager = new BackupManager(plugin);
+        this.preloadManager = preloadManager;
     }
 
     private volatile boolean resetInProgress = false;
@@ -96,8 +99,15 @@ public class ResetService {
             }
         }
 
-        auditLogger.log(plugin, "Countdown started by " + initiator.getName() + " for '" + baseWorldName + "' (seconds=" + seconds + ", seed=" + seedOpt.map(Object::toString).orElse("random") + ", dims=" + dims + ")");
-        countdownManager.runCountdown(baseWorldName, seconds, audience, () -> resetWorldAsync(initiator, baseWorldName, seedOpt, dims));
+        long chosenSeed = seedOpt.orElseGet(() -> new Random().nextLong());
+        auditLogger.log(plugin, "Countdown started by " + initiator.getName() + " for '" + baseWorldName + "' (seconds=" + seconds + ", seed=" + chosenSeed + ", dims=" + dims + ")");
+        // Preload temporary worlds during countdown
+        EnumSet<com.github.codex.fullreset.util.PreloadManager.Dimension> preloadDims = EnumSet.noneOf(com.github.codex.fullreset.util.PreloadManager.Dimension.class);
+        if (dims.contains(Dimension.OVERWORLD)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.OVERWORLD);
+        if (dims.contains(Dimension.NETHER)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.NETHER);
+        if (dims.contains(Dimension.END)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.END);
+        preloadManager.preload(baseWorldName, chosenSeed, preloadDims);
+        countdownManager.runCountdown(baseWorldName, seconds, audience, () -> resetWorldAsync(initiator, baseWorldName, Optional.of(chosenSeed), dims));
     }
 
     public void resetWorldAsync(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt) {
@@ -147,18 +157,11 @@ public class ResetService {
                 // Resolve world folders before unloading, in case some are not loaded
                 Map<String, Path> worldFolders = resolveWorldFolders(worldNames);
 
-                // Unload worlds
-                for (String name : worldNames) {
-                    World w = Bukkit.getWorld(name);
-                    if (w != null) {
-                        boolean ok = Bukkit.unloadWorld(w, false);
-                        if (!ok) {
-                            Messages.send(initiator, "&cFailed to unload world '&e" + name + "&c' — aborting.");
-                            resetInProgress = false;
-                            phase = "IDLE";
-                            return;
-                        }
-                    }
+                // Unload worlds (retry if necessary)
+                if (!unloadWorldsReliably(worldNames, fallback, initiator)) {
+                    resetInProgress = false;
+                    phase = "IDLE";
+                    return;
                 }
 
                 boolean backupsEnabled = plugin.getConfig().getBoolean("backups.enabled", true);
@@ -170,18 +173,24 @@ public class ResetService {
                         if (backupsEnabled) {
                             backupManager.snapshot(worldBase, worldFolders);
                         } else {
-                            // Delete in async
-                            for (Path path : worldFolders.values()) {
-                                if (path != null && Files.exists(path)) {
-                                    try {
-                                        deletePath(path);
-                                    } catch (IOException ex) {
-                                        plugin.getLogger().warning("Delete failed for " + path + ": " + ex.getMessage());
-                                    }
+                            // Move to trash quickly; delete later
+                            Path trashRoot = plugin.getDataFolder().toPath().resolve("trash").resolve(String.valueOf(System.currentTimeMillis()));
+                            Files.createDirectories(trashRoot);
+                            for (Map.Entry<String, Path> e : worldFolders.entrySet()) {
+                                Path path = e.getValue();
+                                if (path == null || !Files.exists(path)) continue;
+                                try {
+                                    Files.move(path, trashRoot.resolve(path.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+                                } catch (Exception ex) {
+                                    try { deletePath(path); } catch (IOException ignored) {}
                                 }
                             }
+                            CompletableFuture.runAsync(() -> { try { deletePath(trashRoot); } catch (IOException ignored) {} });
                         }
-                        Bukkit.getScheduler().runTask(plugin, () -> recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers, dims));
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            swapPreloadedIfAny(worldBase, dims);
+                            recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers, dims);
+                        });
                     } catch (Exception ex) {
                         Bukkit.getScheduler().runTask(plugin, () -> {
                             Messages.send(initiator, "&cUnexpected error while deleting worlds: " + ex.getMessage());
@@ -558,5 +567,51 @@ public class ResetService {
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+
+    private boolean unloadWorldsReliably(List<String> worldNames, World fallback, CommandSender initiator) {
+        List<String> remaining = new ArrayList<>();
+        for (String name : worldNames) {
+            World w = Bukkit.getWorld(name);
+            if (w == null) continue;
+            for (Player pl : new ArrayList<>(w.getPlayers())) safeTeleport(pl, fallback.getSpawnLocation());
+            try { w.save(); } catch (Exception ignored) {}
+            if (!Bukkit.unloadWorld(w, true)) remaining.add(name);
+        }
+        if (remaining.isEmpty()) return true;
+        final int max = 5;
+        for (int attempt = 1; attempt <= max && !remaining.isEmpty(); attempt++) {
+            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+            Iterator<String> it = remaining.iterator();
+            while (it.hasNext()) {
+                String name = it.next();
+                World w = Bukkit.getWorld(name);
+                if (w == null) { it.remove(); continue; }
+                for (Player pl : new ArrayList<>(w.getPlayers())) safeTeleport(pl, fallback.getSpawnLocation());
+                try { w.save(); } catch (Exception ignored) {}
+                if (Bukkit.unloadWorld(w, true)) it.remove();
+            }
+        }
+        if (!remaining.isEmpty()) {
+            Messages.send(initiator, "&cFailed to unload: &e" + String.join(", ", remaining));
+        }
+        return remaining.isEmpty();
+    }
+
+    private void swapPreloadedIfAny(String base, EnumSet<Dimension> dims) {
+        for (String target : dimensionNames(base, dims)) {
+            String prep = "brprep_" + target;
+            World prepWorld = Bukkit.getWorld(prep);
+            if (prepWorld != null) Bukkit.unloadWorld(prepWorld, true);
+            File container = Bukkit.getWorldContainer();
+            File prepFolder = new File(container, prep);
+            File targetFolder = new File(container, target);
+            if (prepFolder.exists()) {
+                if (targetFolder.exists()) {
+                    try { deletePath(targetFolder.toPath()); } catch (Exception ignored) {}
+                }
+                try { Files.move(prepFolder.toPath(), targetFolder.toPath(), StandardCopyOption.REPLACE_EXISTING); } catch (Exception ignored) {}
+            }
+        }
     }
 }
