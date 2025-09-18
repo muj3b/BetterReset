@@ -7,6 +7,7 @@ import com.github.codex.fullreset.util.MultiverseCompat;
 import com.github.codex.fullreset.util.ResetAuditLogger;
 import com.github.codex.fullreset.util.BackupManager;
 import com.github.codex.fullreset.util.PreloadManager;
+import com.github.codex.fullreset.util.SeedHistory;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -22,7 +23,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Orchestrates the safe reset flow:
@@ -34,14 +35,27 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class ResetService {
 
+    public enum Dimension {
+        OVERWORLD, NETHER, END
+    }
+
     private final FullResetPlugin plugin;
+    @SuppressWarnings("unused")
     private final ConfirmationManager confirmationManager;
     private final CountdownManager countdownManager;
     private final MultiverseCompat multiverseCompat;
     private final BackupManager backupManager;
+    @SuppressWarnings("unused")
     private final PreloadManager preloadManager;
 
     private final ResetAuditLogger auditLogger = new ResetAuditLogger();
+    private final Map<UUID, ResetTask> activeTasks = new HashMap<>();
+    private final Random rng = new Random();
+    private final SeedHistory seedHistory;
+    // per-base cooldown (millis)
+    private final Map<String, Long> lastResetAt = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastResetTimestamp = new ConcurrentHashMap<>();
+    private long totalResets = 0;
 
     public ResetService(FullResetPlugin plugin, ConfirmationManager confirmationManager, CountdownManager countdownManager, MultiverseCompat multiverseCompat, PreloadManager preloadManager) {
         this.plugin = plugin;
@@ -50,79 +64,228 @@ public class ResetService {
         this.multiverseCompat = multiverseCompat;
         this.backupManager = new BackupManager(plugin);
         this.preloadManager = preloadManager;
+    this.seedHistory = plugin.getSeedHistory();
     }
 
     private volatile boolean resetInProgress = false;
     private volatile String currentTarget = null;
     private volatile String phase = "IDLE"; // IDLE, COUNTDOWN, RUNNING
 
-    public void startResetWithCountdown(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt) {
-        startResetWithCountdown(initiator, baseWorldName, seedOpt, EnumSet.of(Dimension.OVERWORLD, Dimension.NETHER, Dimension.END));
-    }
-
-    public enum Dimension { OVERWORLD, NETHER, END }
-
-    public void startResetWithCountdown(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt, EnumSet<Dimension> dims) {
+    public void startReset(Player player, String baseWorld, EnumSet<Dimension> dimensions) {
+        // cooldown check
+        int cooldownSeconds = plugin.getConfig().getInt("limits.resetCooldownSeconds", 0);
+        if (cooldownSeconds > 0) {
+            Long last = lastResetAt.get(baseWorld);
+            if (last != null && (System.currentTimeMillis() - last) < (cooldownSeconds * 1000L)) {
+                Messages.send(player, "&cA reset for &6" + baseWorld + "&c was performed recently. Please wait before retrying.");
+                return;
+            }
+        }
         if (resetInProgress) {
-            Messages.send(initiator, "&cA reset is already in progress. Please wait.");
+            Messages.send(player, "&cA reset is already in progress. Please wait.");
             return;
         }
+
         // Gate by online players threshold if configured
         int maxOnline = plugin.getConfig().getInt("limits.maxOnlineForReset", -1);
         if (maxOnline >= 0 && Bukkit.getOnlinePlayers().size() > maxOnline) {
-            Messages.send(initiator, "&cToo many players online to reset now (&e" + Bukkit.getOnlinePlayers().size() + "&c > &e" + maxOnline + "&c).");
+            Messages.send(player, "&cToo many players online to reset now (&e" + Bukkit.getOnlinePlayers().size() + "&c > &e" + maxOnline + "&c).");
             return;
         }
+
+        // Find all affected worlds
+        List<World> affectedWorlds = dimensions.stream()
+            .flatMap(dim -> getAffectedWorld(baseWorld, dim).stream())
+            .toList();
+
+        // Create the reset task
+        ResetTask task = new ResetTask(baseWorld, dimensions, player, null, affectedWorlds);
+        activeTasks.put(player.getUniqueId(), task);
+
+        // Start countdown
         int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
-        Messages.send(initiator, "&eStarting reset countdown for &6" + baseWorldName + "&e...");
-        for (Player online : Bukkit.getOnlinePlayers()) {
-            if (online.equals(initiator)) continue;
-            if (online.hasPermission("betterreset.notify")) {
-                Messages.send(online, "&e[BetterReset]&7 Countdown started for '&e" + baseWorldName + "&7'.");
+        Messages.send(player, "&eStarting reset countdown for &6" + baseWorld + "&e...");
+
+        countdownManager.startCountdown(
+            task.getInitiator(),
+            task.getAffectedWorlds(),
+            seconds,
+            () -> {
+                if (!task.isCancelled()) {
+                    performReset(task);
+                    lastResetAt.put(baseWorld, System.currentTimeMillis());
+                }
             }
-        }
+        );
+
         resetInProgress = true;
-        currentTarget = baseWorldName;
+        currentTarget = baseWorld;
         phase = "COUNTDOWN";
-
-        // Decide audience
-        boolean broadcast = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
-        Set<Player> audience;
-        if (broadcast) {
-            audience = new java.util.HashSet<>(Bukkit.getOnlinePlayers());
-        } else {
-            // Only players in affected worlds
-            java.util.List<String> dimsList = dimensionNames(baseWorldName, dims);
-            audience = new java.util.HashSet<>();
-            for (Player p : Bukkit.getOnlinePlayers()) {
-                if (dimsList.contains(p.getWorld().getName())) audience.add(p);
-            }
-        }
-
-        long chosenSeed = seedOpt.orElseGet(() -> new Random().nextLong());
-        auditLogger.log(plugin, "Countdown started by " + initiator.getName() + " for '" + baseWorldName + "' (seconds=" + seconds + ", seed=" + chosenSeed + ", dims=" + dims + ")");
-        boolean preloadEnabled = plugin.getConfig().getBoolean("preload.enabled", true);
-        boolean auto = plugin.getConfig().getBoolean("preload.autoDisableHighLag", true);
-        double threshold = plugin.getConfig().getDouble("preload.tpsThreshold", 18.0);
-        if (preloadEnabled) {
-            boolean shouldPreload = true;
-            if (auto) {
-                try {
-                    double[] tps = (double[]) Bukkit.getServer().getClass().getMethod("getTPS").invoke(Bukkit.getServer());
-                    if (tps != null && tps.length > 0 && tps[0] < threshold) shouldPreload = false;
-                } catch (Throwable ignored) { /* Not Paper or method missing */ }
-            }
-            if (shouldPreload) {
-                EnumSet<com.github.codex.fullreset.util.PreloadManager.Dimension> preloadDims = EnumSet.noneOf(com.github.codex.fullreset.util.PreloadManager.Dimension.class);
-                if (dims.contains(Dimension.OVERWORLD)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.OVERWORLD);
-                if (dims.contains(Dimension.NETHER)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.NETHER);
-                if (dims.contains(Dimension.END)) preloadDims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.END);
-                preloadManager.preload(baseWorldName, chosenSeed, preloadDims);
-            }
-        }
-        countdownManager.runCountdown(baseWorldName, seconds, audience, () -> resetWorldAsync(initiator, baseWorldName, Optional.of(chosenSeed), dims));
     }
 
+    /**
+     * Start a reset with optional custom seed and dimensions (used by GUI)
+     */
+    public void startResetWithCountdown(Player player, String baseWorld, Optional<Long> seedOpt, EnumSet<Dimension> dimensions) {
+        if (resetInProgress) {
+            Messages.send(player, "&cA reset is already in progress. Please wait.");
+            return;
+        }
+
+        // Create the reset task with provided seed
+        List<World> affectedWorlds = dimensions.stream()
+            .flatMap(dim -> getAffectedWorld(baseWorld, dim).stream())
+            .toList();
+
+        // ResetTask stores a boxed Long for the custom seed; convert Optional -> Long (or null)
+    ResetTask task = new ResetTask(baseWorld, dimensions, player, seedOpt.orElse(null), affectedWorlds);
+        activeTasks.put(player.getUniqueId(), task);
+
+        int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
+        Messages.send(player, "&eStarting reset countdown for &6" + baseWorld + "&e...");
+
+        countdownManager.startCountdown(
+            task.getInitiator(),
+            task.getAffectedWorlds(),
+            seconds,
+            () -> {
+                if (!task.isCancelled()) {
+                    performReset(task);
+                    lastResetAt.put(baseWorld, System.currentTimeMillis());
+                }
+            }
+        );
+
+        resetInProgress = true;
+        currentTarget = baseWorld;
+        phase = "COUNTDOWN";
+    }
+
+    /**
+     * Command-based overload used by console/commands
+     */
+    public void startResetWithCountdown(CommandSender sender, String baseWorld, Optional<Long> seed) {
+        Player player = null;
+        if (sender instanceof Player p) player = p;
+        EnumSet<Dimension> dims = EnumSet.of(Dimension.OVERWORLD, Dimension.NETHER, Dimension.END);
+        if (player != null) startResetWithCountdown(player, baseWorld, seed, dims);
+        else {
+            // console: create a dummy player-like flow using the server
+            // There is no Messages.broadcast helper; send to console directly
+            Messages.send(Bukkit.getConsoleSender(), "&eConsole initiated reset for " + baseWorld);
+            // For console, run immediate reset without countdown
+            List<World> affectedWorlds = dims.stream()
+                .flatMap(dim -> getAffectedWorld(baseWorld, dim).stream())
+                .toList();
+            ResetTask task = new ResetTask(baseWorld, dims, null, seed.orElse(null), affectedWorlds);
+            // Use plugin background executor for async reset work
+            plugin.getBackgroundExecutor().submit(() -> performReset(task));
+        }
+    }
+
+    private Optional<World> getAffectedWorld(String baseWorld, Dimension dim) {
+        String worldName = switch (dim) {
+            case OVERWORLD -> baseWorld;
+            case NETHER -> baseWorld + "_nether";
+            case END -> baseWorld + "_the_end";
+        };
+        return Optional.ofNullable(Bukkit.getWorld(worldName));
+    }
+
+    private void performReset(ResetTask task) {
+        if (task.isCancelled()) {
+            return;
+        }
+
+        // Save all players
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            player.saveData();
+        }
+
+        // Move players to safety
+        String fallback = plugin.getConfig().getString("teleport.fallbackWorldName", "");
+        World fallbackWorld = !fallback.isEmpty() ? Bukkit.getWorld(fallback) : null;
+
+        if (fallbackWorld == null) {
+            fallbackWorld = Bukkit.getWorlds().get(0);
+        }
+
+        Location fallbackSpawn = fallbackWorld.getSpawnLocation();
+        for (World world : task.getAffectedWorlds()) {
+            for (Player player : world.getPlayers()) {
+                player.teleport(fallbackSpawn);
+            }
+        }
+
+        // Unload worlds
+        for (World world : task.getAffectedWorlds()) {
+            Bukkit.unloadWorld(world, true);
+        }
+
+        // Let the async deletion and regeneration happen in a separate thread
+        // Execute deletion/regeneration using plugin background executor to control thread pool
+        plugin.getBackgroundExecutor().submit(() -> {
+            try {
+                // Delete world files
+                for (World world : task.getAffectedWorlds()) {
+                    File worldFolder = world.getWorldFolder();
+                    if (worldFolder.exists()) {
+                        deleteWorldFolder(worldFolder);
+                    }
+                }
+
+                // Regenerate worlds on main thread
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    regenerateWorlds(task);
+                    resetInProgress = false;
+                    currentTarget = null;
+                    phase = "IDLE";
+                    Messages.send(task.getInitiator(), "&aReset complete!");
+                    try {
+                        totalResets++;
+                        lastResetTimestamp.put(task.getBaseWorld(), System.currentTimeMillis());
+                    } catch (Exception ignored) {}
+                });
+            } catch (Exception e) {
+                e.printStackTrace();
+                Messages.send(task.getInitiator(), "&cError during reset: " + e.getMessage());
+            }
+        });
+    }
+
+    private void deleteWorldFolder(File folder) throws IOException {
+        deletePath(folder.toPath());
+    }
+
+    private void regenerateWorlds(ResetTask task) {
+        for (World world : task.getAffectedWorlds()) {
+            WorldCreator creator = new WorldCreator(world.getName());
+            if (task.getCustomSeed().isPresent()) {
+                creator.seed(task.getCustomSeed().get());
+            }
+            creator.environment(world.getEnvironment());
+            creator.type(WorldType.NORMAL);
+            World newWorld = creator.createWorld();
+            if (newWorld == null) {
+                Messages.send(task.getInitiator(), "&cFailed to regenerate world: " + world.getName());
+                continue;
+            }
+        }
+
+        if (plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true)) {
+            World overworld = Bukkit.getWorld(task.getBaseWorld());
+            if (overworld != null) {
+                Location spawn = overworld.getSpawnLocation();
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    if (player.hasPermission("betterreset.use")) {
+                        player.teleport(spawn);
+                    }
+                }
+            }
+        }
+    }
+
+    
     public void resetWorldAsync(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt) {
         resetWorldAsync(initiator, baseWorldName, seedOpt, EnumSet.of(Dimension.OVERWORLD, Dimension.NETHER, Dimension.END));
     }
@@ -180,8 +343,8 @@ public class ResetService {
                 boolean backupsEnabled = plugin.getConfig().getBoolean("backups.enabled", true);
                 Messages.send(initiator, backupsEnabled ? "&7Worlds unloaded. Archiving backups and recreating..." : "&7Worlds unloaded. Deleting old folders and recreating...");
 
-                // Async snapshot (move) or delete, then recreate
-                CompletableFuture.runAsync(() -> {
+                // Async snapshot (move) or delete, then recreate using plugin executor
+                plugin.getBackgroundExecutor().submit(() -> {
                     try {
                         if (backupsEnabled) {
                             backupManager.snapshot(worldBase, worldFolders);
@@ -193,12 +356,13 @@ public class ResetService {
                                 Path path = e.getValue();
                                 if (path == null || !Files.exists(path)) continue;
                                 try {
-                                    Files.move(path, trashRoot.resolve(path.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+                                    moveWithFallback(path, trashRoot.resolve(path.getFileName()));
                                 } catch (Exception ex) {
                                     try { deletePath(path); } catch (IOException ignored) {}
                                 }
                             }
-                            CompletableFuture.runAsync(() -> { try { deletePath(trashRoot); } catch (IOException ignored) {} });
+                            // schedule trash deletion on executor as well
+                            plugin.getBackgroundExecutor().submit(() -> { try { deletePath(trashRoot); } catch (IOException ignored) {} });
                         }
                         Bukkit.getScheduler().runTask(plugin, () -> {
                             swapPreloadedIfAny(worldBase, dims);
@@ -225,7 +389,7 @@ public class ResetService {
     private void recreateWorlds(CommandSender initiator, String base, Optional<Long> seedOpt, Set<UUID> previouslyAffected, EnumSet<Dimension> dims) {
         try {
             boolean sameSeedForAll = plugin.getConfig().getBoolean("seeds.useSameSeedForAllDimensions", true);
-            long baseSeed = seedOpt.orElseGet(() -> new Random().nextLong());
+            long baseSeed = seedOpt.orElseGet(() -> rng.nextLong());
             World overworld = null;
             if (dims.contains(Dimension.OVERWORLD)) {
                 overworld = new WorldCreator(base)
@@ -245,7 +409,7 @@ public class ResetService {
             }
 
             // nether
-            long netherSeed = sameSeedForAll ? baseSeed : new Random().nextLong();
+            long netherSeed = sameSeedForAll ? baseSeed : rng.nextLong();
             if (dims.contains(Dimension.NETHER)) {
                 World nether = new WorldCreator(base + "_nether")
                         .seed(netherSeed)
@@ -264,7 +428,7 @@ public class ResetService {
             }
 
             // the end
-            long endSeed = sameSeedForAll ? baseSeed : new Random().nextLong();
+            long endSeed = sameSeedForAll ? baseSeed : rng.nextLong();
             if (dims.contains(Dimension.END)) {
                 World theEnd = new WorldCreator(base + "_the_end")
                         .seed(endSeed)
@@ -284,6 +448,12 @@ public class ResetService {
 
             // Optional: Multiverse compatibility – if present, it will typically detect loads via events.
             // We avoid a hard dependency to keep the plugin simple and portable.
+
+            // record seed(s)
+            try {
+                seedHistory.add(baseSeed);
+                if (!sameSeedForAll) { seedHistory.add(netherSeed); seedHistory.add(endSeed); }
+            } catch (Exception ignored) {}
 
             Messages.send(initiator, "&aRecreated worlds for '&e" + base + "&a' successfully.");
 
@@ -390,6 +560,10 @@ public class ResetService {
     public List<com.github.codex.fullreset.util.BackupManager.BackupRef> listBackups() {
         return backupManager.listBackups();
     }
+
+    public long getTotalResets() { return totalResets; }
+
+    public Optional<Long> getLastResetTimestamp(String base) { return Optional.ofNullable(lastResetTimestamp.get(base)); }
 
     public void restoreBackupAsync(CommandSender initiator, String base, String timestamp) {
         if (resetInProgress) {
@@ -583,8 +757,15 @@ public class ResetService {
     }
 
     public void testResetAsync(CommandSender initiator, String base, Optional<Long> seedOpt, EnumSet<Dimension> dims) {
+        testResetAsync(initiator, base, seedOpt, dims, false);
+    }
+
+    /**
+     * Test reset with optional dryRun: when dryRun=true, worlds are created but not deleted.
+     */
+    public void testResetAsync(CommandSender initiator, String base, Optional<Long> seedOpt, EnumSet<Dimension> dims, boolean dryRun) {
         String testBase = ("brtest_" + base + "_" + System.currentTimeMillis());
-        long seed = seedOpt.orElseGet(() -> new Random().nextLong());
+        long seed = seedOpt.orElseGet(() -> rng.nextLong());
         Messages.send(initiator, "&7Starting test reset for '&e" + base + "&7' → temp '&e" + testBase + "&7'.");
         long t0 = System.nanoTime();
         Bukkit.getScheduler().runTask(plugin, () -> {
@@ -602,7 +783,11 @@ public class ResetService {
                     World w = Bukkit.getWorld(name);
                     if (w != null) Bukkit.unloadWorld(w, true);
                 }
-                CompletableFuture.runAsync(() -> {
+                if (dryRun) {
+                    long tEnd = System.nanoTime();
+                    Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aDry-run complete. Total test time: &e" + ((tEnd - t0)/1_000_000) + "ms"));
+                } else {
+                    CompletableFuture.runAsync(() -> {
                     try {
                         for (String name : dimensionNames(testBase, dims)) {
                             File f = new File(Bukkit.getWorldContainer(), name);
@@ -613,7 +798,8 @@ public class ResetService {
                     } catch (Exception ex) {
                         Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cTest cleanup failed: " + ex.getMessage()));
                     }
-                });
+                    });
+                }
             } catch (Exception ex) {
                 Messages.send(initiator, "&cTest reset failed: " + ex.getMessage());
             }
@@ -634,7 +820,8 @@ public class ResetService {
             p.getInventory().clear();
             p.getEnderChest().clear();
             p.setFireTicks(0);
-            p.setHealth(Math.min(p.getMaxHealth(), 20.0));
+            double maxHealth = p.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
+            p.setHealth(Math.min(maxHealth, 20.0));
             p.setFoodLevel(20);
             p.setSaturation(5f);
             p.setExhaustion(0f);
@@ -705,8 +892,54 @@ public class ResetService {
                 if (targetFolder.exists()) {
                     try { deletePath(targetFolder.toPath()); } catch (Exception ignored) {}
                 }
-                try { Files.move(prepFolder.toPath(), targetFolder.toPath(), StandardCopyOption.REPLACE_EXISTING); } catch (Exception ignored) {}
+                try { moveWithFallback(prepFolder.toPath(), targetFolder.toPath()); } catch (Exception ignored) {}
             }
         }
+    }
+
+    private void moveWithFallback(Path src, Path dst) throws IOException, InterruptedException {
+        // Try atomic move first
+        int attempts = 3;
+        for (int i = 0; i < attempts; i++) {
+            try {
+                Files.createDirectories(dst.getParent());
+                Files.move(src, dst, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                return;
+            } catch (AtomicMoveNotSupportedException amnse) {
+                // fall through to non-atomic move
+                try { Files.move(src, dst, StandardCopyOption.REPLACE_EXISTING); return; } catch (Exception ignored) {}
+            } catch (IOException ex) {
+                // retry with small backoff
+                Thread.sleep(50);
+            }
+        }
+        // Fallback: try File.renameTo (platform-dependent)
+        try {
+            src.toFile().renameTo(dst.toFile());
+            if (!Files.exists(dst)) throw new IOException("renameTo failed");
+            return;
+        } catch (Exception ignored) {}
+        // Last resort: copy and delete
+        copyAndDelete(src, dst);
+    }
+
+    private void copyAndDelete(Path src, Path dst) throws IOException {
+        Files.walkFileTree(src, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                Path rel = src.relativize(dir);
+                Path target = dst.resolve(rel);
+                Files.createDirectories(target);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Path rel = src.relativize(file);
+                Files.copy(file, dst.resolve(rel), StandardCopyOption.REPLACE_EXISTING);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        deletePath(src);
     }
 }

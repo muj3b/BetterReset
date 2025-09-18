@@ -25,6 +25,7 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
 
     private final FullResetPlugin plugin;
     private final ResetService resetService;
+    @SuppressWarnings("unused")
     private final ConfirmationManager confirmationManager;
     private final GuiManager guiManager;
     private final FullResetCommand delegate;
@@ -96,7 +97,23 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, plugin.getConfig().getString("messages.noPermission"));
                     return true;
                 }
-                Messages.send(sender, "&7Status: &e" + resetService.getStatusLine());
+                String status = resetService.getStatusLine();
+                String extra = "&7Total resets: &e" + resetService.getTotalResets();
+                Messages.send(sender, "&7Status: &e" + status + " &7| " + extra);
+                return true;
+            case "stats":
+                if (!sender.hasPermission("betterreset.stats")) { Messages.send(sender, plugin.getConfig().getString("messages.noPermission")); return true; }
+                long total = resetService.getTotalResets();
+                Messages.send(sender, "&7Total resets performed: &e" + total);
+                if (args.length >= 2) {
+                    String base = args[1];
+                    var tsOpt = resetService.getLastResetTimestamp(base);
+                    if (tsOpt.isPresent()) {
+                        Messages.send(sender, "&7Last reset for '&e" + base + "&7' at &e" + java.time.Instant.ofEpochMilli(tsOpt.get()).toString());
+                    } else {
+                        Messages.send(sender, "&7No recorded resets for '&e" + base + "&7'.");
+                    }
+                }
                 return true;
             case "cancel":
                 if (!sender.hasPermission("betterreset.cancel")) {
@@ -148,7 +165,9 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, plugin.getConfig().getString("messages.noPermission"));
                     return true;
                 }
-                Messages.send(sender, "&bBetterReset &7v" + plugin.getDescription().getVersion() + " &7by &emuj3b&7. Type &e/" + label + " creator &7to support.");
+                @SuppressWarnings("deprecation")
+                String ver = plugin.getDescription() != null ? plugin.getDescription().getVersion() : "?";
+                Messages.send(sender, "&bBetterReset &7v" + ver + " &7by &emuj3b&7. Type &e/" + label + " creator &7to support.");
                 return true;
             case "prune":
                 if (!sender.hasPermission("betterreset.prune")) {
@@ -194,13 +213,43 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                 if (args.length < 2) { Messages.send(sender, "&eUsage: /" + label + " testreset <base> [--seed <long>]"); return true; }
                 String baseArg = args[1];
                 Optional<Long> seed = Optional.empty();
+                boolean dryRun = false;
                 for (int i = 2; i < args.length; i++) {
                     if (args[i].equalsIgnoreCase("--seed") && i + 1 < args.length) {
                         try { seed = Optional.of(Long.parseLong(args[++i])); }
                         catch (NumberFormatException ex) { Messages.send(sender, "&cInvalid seed."); return true; }
+                    } else if (args[i].equalsIgnoreCase("--dry-run") || args[i].equalsIgnoreCase("-n")) {
+                        dryRun = true;
                     }
                 }
-                resetService.testResetAsync(sender, baseArg, seed, EnumSet.of(com.github.codex.fullreset.core.ResetService.Dimension.OVERWORLD, com.github.codex.fullreset.core.ResetService.Dimension.NETHER, com.github.codex.fullreset.core.ResetService.Dimension.END));
+                resetService.testResetAsync(sender, baseArg, seed, EnumSet.of(com.github.codex.fullreset.core.ResetService.Dimension.OVERWORLD, com.github.codex.fullreset.core.ResetService.Dimension.NETHER, com.github.codex.fullreset.core.ResetService.Dimension.END), dryRun);
+                return true;
+            case "seeds":
+                if (!sender.hasPermission("betterreset.seeds")) { Messages.send(sender, plugin.getConfig().getString("messages.noPermission")); return true; }
+                if (args.length == 1 || args[1].equalsIgnoreCase("list")) {
+                    var history = plugin.getSeedHistory().list();
+                    if (history.isEmpty()) { Messages.send(sender, "&eNo recent seeds recorded."); return true; }
+                    StringBuilder sb = new StringBuilder();
+                    int i = 0;
+                    for (Long s : history) { sb.append("[").append(i++).append("] ").append(s).append(i<history.size()?", ":""); }
+                    Messages.send(sender, "&7Recent seeds: &f" + sb.toString());
+                    return true;
+                }
+                if (args.length >= 3 && args[1].equalsIgnoreCase("use")) {
+                    try {
+                        int idx = Integer.parseInt(args[2]);
+                        var list = plugin.getSeedHistory().list();
+                        if (idx < 0 || idx >= list.size()) { Messages.send(sender, "&cInvalid seed index."); return true; }
+                        long seedVal = list.get(idx);
+                        Messages.send(sender, "&aUsing seed &e" + seedVal + "&a for next test reset.");
+                        // Attach seed to a test run if player provided or give instruction
+                        if (sender instanceof Player p) {
+                            resetService.testResetAsync(p, p.getWorld().getName(), Optional.of(seedVal), EnumSet.of(com.github.codex.fullreset.core.ResetService.Dimension.OVERWORLD));
+                        }
+                        return true;
+                    } catch (NumberFormatException ex) { Messages.send(sender, "&cInvalid index."); return true; }
+                }
+                Messages.send(sender, "&eUsage: /" + label + " seeds list | use <index>");
                 return true;
             default:
                 Messages.send(sender, "&cUnknown subcommand. Use &e/" + label + " <fullreset|gui|reload>");
@@ -211,7 +260,7 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            List<String> subs = Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune","deleteallbackups","preload","testreset");
+            List<String> subs = Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune","deleteallbackups","preload","testreset","seeds");
             return subs.stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
         }
         if (args.length >= 2 && args[0].equalsIgnoreCase("fullreset")) {
@@ -225,6 +274,16 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("testreset")) {
             String prefix = args[1].toLowerCase(java.util.Locale.ROOT);
             return Bukkit.getWorlds().stream().map(World::getName).map(BetterResetCommand::base).distinct().filter(n -> n.toLowerCase(java.util.Locale.ROOT).startsWith(prefix)).collect(java.util.stream.Collectors.toList());
+        }
+        if (args.length >= 2 && args[0].equalsIgnoreCase("seeds")) {
+            if (args.length == 2) return Arrays.asList("list","use").stream().filter(s -> s.startsWith(args[1].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
+            if (args.length == 3 && args[1].equalsIgnoreCase("use")) {
+                // suggest numeric indices from seed history
+                try {
+                    var list = plugin.getSeedHistory().list();
+                    return java.util.stream.IntStream.range(0, list.size()).mapToObj(Integer::toString).filter(s -> s.startsWith(args[2])).collect(Collectors.toList());
+                } catch (Exception ignored) {}
+            }
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("prune")) {
             // Suggest known bases from loaded worlds and backup list

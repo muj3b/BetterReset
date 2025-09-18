@@ -24,7 +24,21 @@ public class CountdownManager {
         this.plugin = plugin;
     }
 
-    public synchronized void runCountdown(String world, int seconds, Set<Player> audience, Runnable onFinish) {
+    public synchronized void startCountdown(Player initiator, java.util.List<org.bukkit.World> affectedWorlds, int seconds, Runnable onComplete) {
+        cancel();
+        String label = (affectedWorlds != null && !affectedWorlds.isEmpty()) ? affectedWorlds.get(0).getName() : "";
+        Set<Player> audience = new HashSet<>();
+        if (plugin.getConfig().getBoolean("countdown.broadcastToAll", true)) {
+            audience.addAll(Bukkit.getOnlinePlayers());
+        } else if (affectedWorlds != null) {
+            for (org.bukkit.World world : affectedWorlds) {
+                audience.addAll(world.getPlayers());
+            }
+        }
+        startCountdownInternal(label, seconds, audience, onComplete);
+    }
+
+    private synchronized void startCountdownInternal(String world, int seconds, Set<Player> audience, Runnable onFinish) {
         cancel();
         this.currentLabel = world;
         this.totalSeconds = Math.max(1, seconds);
@@ -32,7 +46,6 @@ public class CountdownManager {
         if (audience == null || audience.isEmpty()) {
             audience = new HashSet<>(Bukkit.getOnlinePlayers());
         }
-        Set<Player> finalAudience = audience;
 
         this.currentTask = new BukkitRunnable() {
             @Override

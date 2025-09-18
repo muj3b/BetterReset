@@ -20,5 +20,15 @@ public final class Messages {
         Component c = LegacyComponentSerializer.legacyAmpersand().deserialize(s);
         sender.sendMessage(c);
     }
+    
+    public static void sendToRelevant(String message, java.util.List<org.bukkit.World> worlds) {
+        if (message == null || worlds == null || worlds.isEmpty()) return;
+        Component c = LegacyComponentSerializer.legacyAmpersand().deserialize(message);
+        for (org.bukkit.World world : worlds) {
+            for (org.bukkit.entity.Player player : world.getPlayers()) {
+                player.sendMessage(c);
+            }
+        }
+    }
 }
 

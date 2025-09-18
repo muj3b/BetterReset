@@ -30,7 +30,6 @@ public class BackupManager {
         Files.createDirectories(destBase);
         long totalBytes = 0L;
         for (Map.Entry<String, Path> e : worldFolders.entrySet()) {
-            String worldName = e.getKey();
             Path src = e.getValue();
             if (src == null || !Files.exists(src)) continue;
             Path dest = destBase.resolve(src.getFileName());

@@ -1,13 +1,54 @@
 package com.github.codex.fullreset.ui;
 
+import net.kyori.adventure.text.Component;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+/**
+ * Holder for GUI inventories with type tracking and component title support
+ */
 public class GuiHolder implements InventoryHolder {
-    public enum Type { MAIN, SELECT, RESET_OPTIONS, BACKUPS, BACKUP_OPTIONS, DELETE_BACKUP, DELETE_ALL, SETTINGS, MESSAGES }
-    private final Type type;
-    public GuiHolder(Type type) { this.type = type; }
-    public Type getType() { return type; }
-    @Override public Inventory getInventory() { return null; }
-}
+    public enum Type { 
+        MAIN, 
+        SELECT, 
+        RESET_OPTIONS, 
+        SEED_SELECTOR,
+        BACKUPS, 
+        BACKUP_OPTIONS, 
+        DELETE_BACKUP, 
+        DELETE_ALL, 
+        SETTINGS, 
+        MESSAGES 
+    }
 
+    private final Type type;
+    private final Component title;
+    private Inventory inventory;
+
+    public GuiHolder(@NotNull Type type, @NotNull Component title) { 
+        this.type = type;
+        this.title = title;
+    }
+
+    @NotNull
+    public Type getType() { 
+        return type; 
+    }
+
+    @NotNull
+    public Component getTitle() {
+        return title;
+    }
+
+    @Override 
+    @Nullable
+    public Inventory getInventory() { 
+        return inventory;
+    }
+
+    void setInventory(@NotNull Inventory inventory) {
+        this.inventory = inventory;
+    }
+}

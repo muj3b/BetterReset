@@ -1,7 +1,6 @@
 package com.github.codex.fullreset;
 
 import com.github.codex.fullreset.command.BetterResetCommand;
-import com.github.codex.fullreset.command.FullResetCommand;
 import com.github.codex.fullreset.core.ConfirmationManager;
 import com.github.codex.fullreset.core.ResetService;
 import com.github.codex.fullreset.ui.GuiManager;
@@ -11,6 +10,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import com.github.codex.fullreset.util.RespawnManager;
 import com.github.codex.fullreset.util.PreloadManager;
 import com.github.codex.fullreset.util.PlaytimeTracker;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * BetterReset plugin entry.
@@ -34,6 +35,8 @@ public final class FullResetPlugin extends JavaPlugin {
     private RespawnManager respawnManager;
     private PreloadManager preloadManager;
     private PlaytimeTracker playtimeTracker;
+    private ExecutorService backgroundExecutor;
+    private com.github.codex.fullreset.util.SeedHistory seedHistory;
 
     @Override
     public void onEnable() {
@@ -41,13 +44,21 @@ public final class FullResetPlugin extends JavaPlugin {
         saveDefaultConfig();
 
         this.confirmationManager = new ConfirmationManager(this);
-        this.countdownManager = new CountdownManager(this);
+    this.countdownManager = new CountdownManager(this);
         this.multiverseCompat = new MultiverseCompat(this);
         this.preloadManager = new PreloadManager(this);
         this.resetService = new ResetService(this, confirmationManager, countdownManager, multiverseCompat, preloadManager);
         this.guiManager = new GuiManager(this, resetService);
         this.respawnManager = new RespawnManager(this);
         this.playtimeTracker = new PlaytimeTracker(this);
+
+    // Seed history shared store
+    int historySize = Math.max(1, getConfig().getInt("seeds.historyCapacity", 10));
+    this.seedHistory = new com.github.codex.fullreset.util.SeedHistory(historySize);
+
+    // Create background executor for heavy IO tasks. Size is configurable.
+    int parallel = getConfig().getInt("deletion.parallelism", 2);
+    this.backgroundExecutor = Executors.newFixedThreadPool(Math.max(1, parallel));
 
         // Register commands
         BetterResetCommand root = new BetterResetCommand(this, resetService, confirmationManager, guiManager);
@@ -64,8 +75,15 @@ public final class FullResetPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (backgroundExecutor != null) {
+            try { backgroundExecutor.shutdownNow(); } catch (Exception ignored) {}
+        }
         getLogger().info("BetterReset disabled.");
     }
+
+    public ExecutorService getBackgroundExecutor() { return backgroundExecutor; }
+
+    public com.github.codex.fullreset.util.SeedHistory getSeedHistory() { return seedHistory; }
 
     public RespawnManager getRespawnManager() {
         return respawnManager;

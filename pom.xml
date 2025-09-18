@@ -36,6 +36,14 @@
             <version>${paper.api.version}</version>
             <scope>provided</scope>
         </dependency>
+        
+        <!-- Apache Commons IO for file operations -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.11.0</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <build>

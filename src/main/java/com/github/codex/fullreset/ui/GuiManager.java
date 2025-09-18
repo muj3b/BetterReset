@@ -3,21 +3,34 @@ package com.github.codex.fullreset.ui;
 import com.github.codex.fullreset.FullResetPlugin;
 import com.github.codex.fullreset.core.ResetService;
 import com.github.codex.fullreset.util.Messages;
+import com.github.codex.fullreset.util.TextComponents;
+import com.github.codex.fullreset.util.TextExtractor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
+import com.github.codex.fullreset.util.VersionCompat;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
+// ...existing code...
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -28,13 +41,13 @@ import java.util.stream.Collectors;
  */
 public class GuiManager implements Listener {
 
-    private static final String TITLE_MAIN = ChatColor.DARK_AQUA + "BetterReset | Manager";
-    private static final String TITLE_SELECT = ChatColor.DARK_GREEN + "Reset | Select World";
-    private static final String TITLE_RESET_FOR = ChatColor.DARK_RED + "Reset | ";
-    private static final String TITLE_BACKUPS = ChatColor.GOLD + "Backups";
-    private static final String TITLE_BACKUP_OPTIONS = ChatColor.DARK_PURPLE + "Restore | ";
-    private static final String TITLE_DELETE_BACKUP = ChatColor.DARK_RED + "Delete | ";
-    private static final String TITLE_SETTINGS = ChatColor.BLUE + "Settings";
+    private static final Component TITLE_MAIN = TextComponents.darkAqua("BetterReset | Manager");
+    private static final Component TITLE_SELECT = TextComponents.darkGreen("Reset | Select World");
+    private static final Component TITLE_RESET_FOR = TextComponents.darkRed("Reset | ");
+    private static final Component TITLE_BACKUPS = TextComponents.gold("Backups");
+    private static final Component TITLE_BACKUP_OPTIONS = TextComponents.darkPurple("Restore | ");
+    private static final Component TITLE_DELETE_BACKUP = TextComponents.darkRed("Delete | ");
+    private static final Component TITLE_SETTINGS = TextComponents.blue("Settings");
 
     private final FullResetPlugin plugin;
     private final ResetService resetService;
@@ -48,29 +61,58 @@ public class GuiManager implements Listener {
         this.plugin = plugin;
         this.resetService = resetService;
         Bukkit.getPluginManager().registerEvents(this, plugin);
+        // Register version-safe chat handler
+        new VersionCompat(plugin, this::onChatMessage);
     }
 
+    private ItemStack namedComponent(Material mat, Component name, Component... lore) {
+        ItemStack it = new ItemStack(mat);
+        ItemMeta meta = it.getItemMeta();
+        if (meta != null) {
+            meta.displayName(name);
+            if (lore.length > 0) {
+                List<Component> loreComponents = new ArrayList<>(lore.length);
+                for (Component loreLine : lore) {
+                    loreComponents.add(loreLine != null ? loreLine : Component.empty());
+                }
+                meta.lore(loreComponents);
+            }
+            it.setItemMeta(meta);
+        }
+        return it;
+    }
+
+    // legacy string helper removed; use namedComponent(Component) instead
+
     public void openMain(Player p) {
-        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.MAIN), 27, TITLE_MAIN);
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.MAIN, TITLE_MAIN);
+        Inventory inv = Bukkit.createInventory(holder, 27, TITLE_MAIN);
+        holder.setInventory(inv);
         // Reset Worlds button
-        inv.setItem(11, named(Material.GRASS_BLOCK, ChatColor.GREEN + "Reset Worlds",
-                ChatColor.GRAY + "Pick a world and choose",
-                ChatColor.GRAY + "Overworld/Nether/End or All"));
+        inv.setItem(11, namedComponent(Material.GRASS_BLOCK, 
+            TextComponents.green("Reset Worlds"),
+            TextComponents.gray("Pick a world and choose"),
+            TextComponents.gray("Overworld/Nether/End or All")));
         // Backups button
-        inv.setItem(15, named(Material.CHEST, ChatColor.GOLD + "Backups",
-                ChatColor.GRAY + "Browse and restore backups"));
+        inv.setItem(15, namedComponent(Material.CHEST, 
+            TextComponents.gold("Backups"),
+            TextComponents.gray("Browse and restore backups")));
         // Settings button
-        inv.setItem(13, named(Material.COMPARATOR, ChatColor.AQUA + "Settings",
-                ChatColor.GRAY + "Change plugin options"));
+        inv.setItem(13, namedComponent(Material.COMPARATOR, 
+            TextComponents.blue("Settings"),
+            TextComponents.gray("Change plugin options")));
         p.openInventory(inv);
     }
 
     public void openWorldSelect(Player p) {
-        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.SELECT), 27, TITLE_SELECT);
         String base = baseName(p.getWorld().getName());
-        inv.setItem(13, named(Material.GRASS_BLOCK, ChatColor.GREEN + base,
-                ChatColor.GRAY + "Click to configure reset"));
-        inv.setItem(22, named(Material.ARROW, ChatColor.YELLOW + "Back"));
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.SELECT, TITLE_SELECT);
+        Inventory inv = Bukkit.createInventory(holder, 27, TITLE_SELECT);
+        holder.setInventory(inv);
+        inv.setItem(13, namedComponent(Material.GRASS_BLOCK,
+            TextComponents.green(base),
+            TextComponents.gray("Click to configure reset")));
+        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
@@ -79,22 +121,31 @@ public class GuiManager implements Listener {
         selectedDims.putIfAbsent(p.getUniqueId(), EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END));
         EnumSet<ResetService.Dimension> dims = selectedDims.get(p.getUniqueId());
 
-        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.RESET_OPTIONS), 45, TITLE_RESET_FOR + base);
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.RESET_OPTIONS, Component.empty().append(TITLE_RESET_FOR).append(Component.text(base)));
+        Inventory inv = Bukkit.createInventory(holder, 45, holder.getTitle());
+        holder.setInventory(inv);
+            
         // Toggles
         inv.setItem(10, toggleItem(dims.contains(ResetService.Dimension.OVERWORLD), Material.GRASS_BLOCK, "Overworld"));
         inv.setItem(12, toggleItem(dims.contains(ResetService.Dimension.NETHER), Material.NETHERRACK, "Nether"));
         inv.setItem(14, toggleItem(dims.contains(ResetService.Dimension.END), Material.END_STONE, "The End"));
 
         // Confirm buttons
-        inv.setItem(22, named(Material.LIME_WOOL, ChatColor.GREEN + "Reset Selected (Random Seed)", ChatColor.GRAY + "Starts countdown"));
-        inv.setItem(24, named(Material.CYAN_WOOL, ChatColor.AQUA + "Reset Selected (Custom Seed)", ChatColor.GRAY + "Type seed in chat"));
+        inv.setItem(22, namedComponent(Material.LIME_WOOL,
+            TextComponents.green("Reset Selected (Random Seed)"),
+            TextComponents.gray("Starts countdown")));
+        inv.setItem(24, namedComponent(Material.CYAN_WOOL,
+            TextComponents.blue("Reset Selected (Custom Seed)"),
+            TextComponents.gray("Choose from history or type in chat")));
         // Navigation
-        inv.setItem(40, named(Material.ARROW, ChatColor.YELLOW + "Back"));
+        inv.setItem(40, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
     private void openBackups(Player p) {
-        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.BACKUPS), 54, TITLE_BACKUPS);
+    GuiHolder holder = new GuiHolder(GuiHolder.Type.BACKUPS, TITLE_BACKUPS);
+    Inventory inv = Bukkit.createInventory(holder, 54, TITLE_BACKUPS);
+    holder.setInventory(inv);
         List<com.github.codex.fullreset.util.BackupManager.BackupRef> refs = resetService.listBackups();
         // Header: per-base Delete ALL
         LinkedHashSet<String> bases = new LinkedHashSet<>();
@@ -102,106 +153,323 @@ public class GuiManager implements Listener {
         int hslot = 0;
         for (String b : bases) {
             if (hslot > 8) break;
-            inv.setItem(hslot++, named(Material.LAVA_BUCKET, ChatColor.DARK_RED + "Delete ALL " + b, ChatColor.GRAY + "Click to confirm"));
+            inv.setItem(hslot++, namedComponent(Material.LAVA_BUCKET,
+                TextComponents.darkRed("Delete ALL " + b),
+                TextComponents.gray("Click to confirm")));
         }
         int slot = 9;
         for (var ref : refs) {
             if (slot >= 48) break; // keep bottom row for controls
-            String label = ChatColor.GOLD + ref.base() + ChatColor.GRAY + " @ " + ChatColor.YELLOW + ref.timestamp();
-            List<String> lore = new ArrayList<>();
-            lore.add(ChatColor.GRAY + "Click to restore");
+            Component label = Component.empty()
+                .append(TextComponents.gold(ref.base()))
+                .append(TextComponents.gray(" @ "))
+                .append(TextComponents.yellow(ref.timestamp()));
+                
+            List<Component> lore = new ArrayList<>();
+            lore.add(TextComponents.gray("Click to restore"));
+            
             java.util.Properties meta = new java.util.Properties();
-            try (java.io.InputStream is = java.nio.file.Files.newInputStream(ref.path().resolve("meta.properties"))) { meta.load(is); } catch (Exception ignored) {}
+            try (java.io.InputStream is = java.nio.file.Files.newInputStream(ref.path().resolve("meta.properties"))) { 
+                meta.load(is); 
+            } catch (Exception ignored) {}
+            
             String sizeStr = meta.getProperty("sizeBytes");
             String play = meta.getProperty("playtimeSeconds");
-            if (sizeStr != null) { try { long sz = Long.parseLong(sizeStr); lore.add(ChatColor.DARK_GRAY + "Size: " + human(sz)); } catch (NumberFormatException ignored) {} }
-            if (play != null) { try { long sec = Long.parseLong(play); lore.add(ChatColor.DARK_GRAY + "Playtime: " + formatDuration(sec)); } catch (NumberFormatException ignored) {} }
-            lore.add(ChatColor.DARK_GRAY + "ID:" + ref.base() + "|" + ref.timestamp());
-            inv.setItem(slot++, named(Material.CHEST, label, lore.toArray(new String[0])));
+            
+            if (sizeStr != null) { 
+                try { 
+                    long sz = Long.parseLong(sizeStr); 
+                    lore.add(TextComponents.darkGray("Size: " + human(sz))); 
+                } catch (NumberFormatException ignored) {} 
+            }
+            
+            if (play != null) { 
+                try { 
+                    long sec = Long.parseLong(play); 
+                    lore.add(TextComponents.darkGray("Playtime: " + formatDuration(sec))); 
+                } catch (NumberFormatException ignored) {} 
+            }
+            
+            lore.add(TextComponents.darkGray("ID:" + ref.base() + "|" + ref.timestamp()));
+            
+            ItemStack item = new ItemStack(Material.CHEST);
+            ItemMeta meta2 = item.getItemMeta();
+            if (meta2 != null) {
+                meta2.displayName(label);
+                meta2.lore(lore);
+                item.setItemMeta(meta2);
+            }
+            inv.setItem(slot++, item);
         }
-        inv.setItem(49, named(Material.SHEARS, ChatColor.RED + "Prune Now"));
-        inv.setItem(53, named(Material.ARROW, ChatColor.YELLOW + "Back"));
+    inv.setItem(49, namedComponent(Material.SHEARS, TextComponents.red("Prune Now")));
+    inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
     private void openBackupOptions(Player p, String base, String ts) {
-        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.BACKUP_OPTIONS), 27, TITLE_BACKUP_OPTIONS + base + ChatColor.GRAY + " @ " + ts);
-        inv.setItem(10, named(Material.LIME_WOOL, ChatColor.GREEN + "Restore ALL"));
-        inv.setItem(12, named(Material.GRASS_BLOCK, ChatColor.WHITE + "Restore Overworld"));
-        inv.setItem(14, named(Material.NETHERRACK, ChatColor.WHITE + "Restore Nether"));
-        inv.setItem(16, named(Material.END_STONE, ChatColor.WHITE + "Restore End"));
-        inv.setItem(20, named(Material.TNT, ChatColor.RED + "Delete Backup"));
-        inv.setItem(22, named(Material.ARROW, ChatColor.YELLOW + "Back"));
+        Component title = Component.empty()
+            .append(TITLE_BACKUP_OPTIONS)
+            .append(Component.text(base))
+            .append(TextComponents.gray(" @ "))
+            .append(Component.text(ts));
+            
+    GuiHolder holder = new GuiHolder(GuiHolder.Type.BACKUP_OPTIONS, title);
+    Inventory inv = Bukkit.createInventory(holder, 27, title);
+    holder.setInventory(inv);
+    inv.setItem(10, namedComponent(Material.LIME_WOOL, TextComponents.green("Restore ALL")));
+    inv.setItem(12, namedComponent(Material.GRASS_BLOCK, TextComponents.white("Restore Overworld")));
+    inv.setItem(14, namedComponent(Material.NETHERRACK, TextComponents.white("Restore Nether")));
+    inv.setItem(16, namedComponent(Material.END_STONE, TextComponents.white("Restore End")));
+    inv.setItem(20, namedComponent(Material.TNT, TextComponents.red("Delete Backup")));
+    inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
     private void openDeleteConfirm(Player p, String base, String ts) {
-        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.DELETE_BACKUP), 27, TITLE_DELETE_BACKUP + base + ChatColor.GRAY + " @ " + ts);
-        inv.setItem(11, named(Material.RED_CONCRETE, ChatColor.DARK_RED + "Confirm Delete"));
-        inv.setItem(15, named(Material.ARROW, ChatColor.YELLOW + "Cancel"));
+        Component title = Component.empty()
+            .append(TITLE_DELETE_BACKUP)
+            .append(Component.text(base))
+            .append(TextComponents.gray(" @ "))
+            .append(Component.text(ts));
+            
+    GuiHolder holder = new GuiHolder(GuiHolder.Type.DELETE_BACKUP, title);
+    Inventory inv = Bukkit.createInventory(holder, 27, title);
+    holder.setInventory(inv);
+    inv.setItem(11, namedComponent(Material.RED_CONCRETE, TextComponents.darkRed("Confirm Delete")));
+    inv.setItem(15, namedComponent(Material.ARROW, TextComponents.yellow("Cancel")));
         p.openInventory(inv);
     }
 
     private void openDeleteAllConfirm(Player p, String base) {
-        Inventory inv = Bukkit.createInventory(new GuiHolder(GuiHolder.Type.DELETE_ALL), 27, ChatColor.DARK_RED + "Delete ALL | " + base);
-        inv.setItem(11, named(Material.RED_CONCRETE, ChatColor.DARK_RED + "Confirm Delete All"));
-        inv.setItem(15, named(Material.ARROW, ChatColor.YELLOW + "Cancel"));
+    Component title = TextComponents.darkRed("Delete ALL | " + base);
+    GuiHolder holder = new GuiHolder(GuiHolder.Type.DELETE_ALL, title);
+    Inventory inv = Bukkit.createInventory(holder, 27, title);
+    holder.setInventory(inv);
+    inv.setItem(11, namedComponent(Material.RED_CONCRETE, TextComponents.darkRed("Confirm Delete All")));
+    inv.setItem(15, namedComponent(Material.ARROW, TextComponents.yellow("Cancel")));
         p.openInventory(inv);
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player p)) return;
-        if (!(e.getView().getTopInventory().getHolder() instanceof GuiHolder)) return;
-        String title = e.getView().getTitle();
-        if (title == null) return;
+        if (!(e.getView().getTopInventory().getHolder() instanceof GuiHolder holder)) return;
+        
         ItemStack it = e.getCurrentItem();
-        if (it == null || !it.hasItemMeta() || it.getItemMeta().getDisplayName() == null) return;
-        String dn = ChatColor.stripColor(it.getItemMeta().getDisplayName());
-
-        if (TITLE_MAIN.equals(title)) {
-            e.setCancelled(true);
-            if (dn.equalsIgnoreCase("Reset Worlds")) {
-                openWorldSelect(p);
-            } else if (dn.equalsIgnoreCase("Backups")) {
-                openBackups(p);
-            } else if (dn.equalsIgnoreCase("Settings")) {
-                openSettings(p);
+        if (it == null || !it.hasItemMeta()) return;
+        
+        ItemMeta meta = it.getItemMeta();
+        if (meta == null || !meta.hasDisplayName()) return;
+        
+        Component displayNameComp = meta.displayName();
+        if (displayNameComp == null) return;
+        
+        String displayName = PlainTextComponentSerializer.plainText().serialize(displayNameComp);
+        GuiHolder.Type type = holder.getType();
+        
+        e.setCancelled(true);
+        
+        switch (type) {
+            case MAIN -> {
+                switch (displayName.toLowerCase()) {
+                    case "reset worlds" -> openWorldSelect(p);
+                    case "backups" -> openBackups(p);
+                    case "settings" -> openSettings(p);
+                }
             }
-            return;
+            case SELECT -> {
+                if (displayName.equalsIgnoreCase("back")) {
+                    openMain(p);
+                } else {
+                    openResetOptions(p, displayName);
+                }
+            }
+            case SETTINGS -> handleSettingsClick(p, displayName, e.getClick());
+            case RESET_OPTIONS -> {
+                String base = selectedBase.get(p.getUniqueId());
+                if (base == null) return;
+                
+                EnumSet<ResetService.Dimension> dims = selectedDims.computeIfAbsent(
+                    p.getUniqueId(), 
+                    k -> EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END)
+                );
+                
+                switch (displayName) {
+                    case "Overworld" -> toggleDim(p, base, dims, ResetService.Dimension.OVERWORLD);
+                    case "Nether" -> toggleDim(p, base, dims, ResetService.Dimension.NETHER);
+                    case "The End" -> toggleDim(p, base, dims, ResetService.Dimension.END);
+                    case "Back" -> openWorldSelect(p);
+                    case "Reset Selected (Random Seed)" -> {
+                        if (dims.isEmpty()) {
+                            Messages.send(p, "&cNo dimensions selected!");
+                            return;
+                        }
+                        p.closeInventory();
+                        resetService.startReset(p, base, dims);
+                    }
+                    case "Reset Selected (Custom Seed)" -> {
+                        if (dims.isEmpty()) {
+                            Messages.send(p, "&cNo dimensions selected!");
+                            return;
+                        }
+                        p.closeInventory();
+                        // open seed selector GUI
+                        openSeedSelector(p, base, dims);
+                    }
+                }
+            }
+            case MESSAGES -> {
+                if (displayName.equalsIgnoreCase("Back")) {
+                    openSettings(p);
+                } else {
+                    String path = "messages." + displayName;
+                    awaitingConfigPath.put(p.getUniqueId(), path);
+                    Messages.send(p, "&eType new text in chat. Color codes use &.");
+                }
+            }
+            case BACKUPS -> {
+                if (displayName.equalsIgnoreCase("Back")) {
+                    openMain(p);
+                    return;
+                }
+                if (displayName.equalsIgnoreCase("Prune Now")) {
+                    p.performCommand("betterreset prune --confirm");
+                    return;
+                }
+                
+                if (displayName.startsWith("Delete ALL ")) {
+                    String base = displayName.substring("Delete ALL ".length());
+                    openDeleteAllConfirm(p, base);
+                    return;
+                }
+                
+                // Try to parse backup info from lore
+                List<Component> lore = meta.lore();
+                if (lore != null) {
+                    String backupId = null;
+                    for (Component line : lore) {
+                        String plainLine = PlainTextComponentSerializer.plainText().serialize(line);
+                        if (plainLine.startsWith("ID:")) {
+                            backupId = plainLine.substring(3);
+                            break;
+                        }
+                    }
+                    if (backupId != null) {
+                        String[] parts = backupId.split("[|]");
+                        if (parts.length == 2) {
+                            openBackupOptions(p, parts[0], parts[1]);
+                        }
+                    }
+                }
+            }
+            case BACKUP_OPTIONS -> {
+                String base = selectedBase.get(p.getUniqueId());
+                String ts = meta.getPersistentDataContainer()
+                    .get(new NamespacedKey(plugin, "backup_timestamp"), 
+                         PersistentDataType.STRING);
+                         
+                if (base == null || ts == null) return;
+                
+                switch (displayName) {
+                    case "Back" -> openBackups(p);
+                    case "Restore ALL" -> {
+                        p.closeInventory();
+                        p.performCommand("betterreset restore " + base + " " + ts);
+                    }
+                    case "Restore Overworld" -> {
+                        p.closeInventory();
+                        p.performCommand("betterreset restore " + base + " " + ts + " ow");
+                    }
+                    case "Restore Nether" -> {
+                        p.closeInventory();
+                        p.performCommand("betterreset restore " + base + " " + ts + " nether");
+                    }
+                    case "Restore End" -> {
+                        p.closeInventory();
+                        p.performCommand("betterreset restore " + base + " " + ts + " end");
+                    }
+                    case "Delete Backup" -> openDeleteConfirm(p, base, ts);
+                }
+            }
+            case DELETE_BACKUP -> {
+                String base = selectedBase.get(p.getUniqueId());
+                String ts = meta.getPersistentDataContainer()
+                    .get(new NamespacedKey(plugin, "backup_timestamp"), 
+                         PersistentDataType.STRING);
+                         
+                if (base == null || ts == null) return;
+                
+                switch (displayName) {
+                    case "Confirm Delete" -> {
+                        p.closeInventory();
+                        p.performCommand("betterreset deletebackup " + base + " " + ts + " --confirm");
+                    }
+                    case "Cancel" -> openBackupOptions(p, base, ts);
+                }
+            }
+            case DELETE_ALL -> {
+                String base = selectedBase.get(p.getUniqueId());
+                if (base == null) return;
+                
+                if (displayName.equalsIgnoreCase("Cancel")) {
+                    openBackups(p);
+                } else if (displayName.equalsIgnoreCase("Confirm Delete All")) {
+                    p.closeInventory();
+                    p.performCommand("betterreset deleteallbackups " + base + " --confirm");
+                }
+            }
+            case SEED_SELECTOR -> {
+                // Expect item display like [index] seed
+                if (displayName.equalsIgnoreCase("Back")) { openResetOptions(p, selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName()))); return; }
+                if (displayName.equalsIgnoreCase("Type Custom Seed")) {
+                    p.closeInventory();
+                    Messages.send(p, "&eType world seed in chat (or RANDOM):");
+                    // awaitingSeedForWorld already set by openSeedSelector; ensure it's present
+                    return;
+                }
+                // try parse index from displayName starting with [idx]
+                if (displayName.startsWith("[")) {
+                    int end = displayName.indexOf(']');
+                    if (end > 0) {
+                        String idxStr = displayName.substring(1, end);
+                        try {
+                            int idx = Integer.parseInt(idxStr);
+                            List<Long> seeds = plugin.getSeedHistory().list();
+                            if (idx >= 0 && idx < seeds.size()) {
+                                long seed = seeds.get(idx);
+                                p.closeInventory();
+                                // parse dims and base from awaitingSeedForWorld mapping
+                                String ctx = awaitingSeedForWorld.remove(p.getUniqueId());
+                                if (ctx != null) {
+                                    String[] parts = ctx.split(";", 2);
+                                    String base = parts[0];
+                                    EnumSet<ResetService.Dimension> dims = EnumSet.of(ResetService.Dimension.OVERWORLD);
+                                    if (parts.length > 1) {
+                                        dims = EnumSet.noneOf(ResetService.Dimension.class);
+                                        for (String s : parts[1].split(",")) dims.add(ResetService.Dimension.valueOf(s));
+                                    }
+                                    resetService.startResetWithCountdown(p, base, Optional.of(seed), dims);
+                                }
+                            }
+                        } catch (NumberFormatException ignored) {}
+                    }
+                }
+            }
         }
-        if (title.startsWith(ChatColor.AQUA + "Messages")) {
+        Component invTitle = holder.getTitle();
+        if (TextExtractor.titleStartsWith(invTitle, TITLE_RESET_FOR)) {
             e.setCancelled(true);
-            if (dn.equalsIgnoreCase("Back")) { openSettings(p); return; }
-            // Clicking a paper opens chat prompt to edit the path labeled by display name
-            String path = "messages." + ChatColor.stripColor(e.getCurrentItem().getItemMeta().getDisplayName());
-            awaitingConfigPath.put(p.getUniqueId(), path);
-            Messages.send(p, "&eType new text in chat. Color codes use &.");
-            return;
-        }
-        if (TITLE_SETTINGS.equals(title)) {
-            e.setCancelled(true);
-            handleSettingsClick(p, dn, e.getClick());
-            return;
-        }
-        if (TITLE_SELECT.equals(title)) {
-            e.setCancelled(true);
-            if (dn.equalsIgnoreCase("Back")) { openMain(p); return; }
-            String base = ChatColor.stripColor(it.getItemMeta().getDisplayName());
-            openResetOptions(p, base);
-            return;
-        }
-        if (title.startsWith(TITLE_RESET_FOR)) {
-            e.setCancelled(true);
-            String base = ChatColor.stripColor(title.substring(TITLE_RESET_FOR.length()));
+            String base = TextExtractor.getText(invTitle).substring(TextExtractor.getText(TITLE_RESET_FOR).length());
             EnumSet<ResetService.Dimension> dims = selectedDims.computeIfAbsent(p.getUniqueId(), k -> EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END));
-            switch (dn) {
+            
+                String itemDisplayName = TextExtractor.getDisplayName(it.getItemMeta());
+                switch (itemDisplayName) {
                 case "Overworld" -> toggleDim(p, base, dims, ResetService.Dimension.OVERWORLD);
                 case "Nether" -> toggleDim(p, base, dims, ResetService.Dimension.NETHER);
                 case "The End" -> toggleDim(p, base, dims, ResetService.Dimension.END);
-                case "Reset Selected (Random Seed)" -> {
+                    case "Reset Selected (Random Seed)" -> {
                     p.closeInventory();
-                    resetService.startResetWithCountdown(p, base, Optional.empty(), dims.clone());
+                    resetService.startReset(p, base, dims);
                 }
                 case "Reset Selected (Custom Seed)" -> {
                     p.closeInventory();
@@ -212,48 +480,59 @@ public class GuiManager implements Listener {
             }
             return;
         }
-        if (TITLE_BACKUPS.equals(title)) {
+    if (TextExtractor.titleMatches(invTitle, TITLE_BACKUPS)) {
             e.setCancelled(true);
-            if (dn.equalsIgnoreCase("Back")) { openMain(p); return; }
-            if (dn.equalsIgnoreCase("Prune Now")) {
-                if (!p.hasPermission("betterreset.prune")) { Messages.send(p, plugin.getConfig().getString("messages.noPermission")); return; }
+            
+            if (displayName.equalsIgnoreCase("Back")) { openMain(p); return; }
+            if (displayName.equalsIgnoreCase("Prune Now")) {
+                if (!p.hasPermission("betterreset.prune")) { 
+                    Messages.send(p, plugin.getConfig().getString("messages.noPermission")); 
+                    return; 
+                }
                 p.closeInventory();
                 resetService.pruneBackupsAsync(p, Optional.empty(), true);
                 return;
             }
-            if (dn.startsWith("Delete ALL ")) {
-                String base = dn.substring("Delete ALL ".length());
-                if (!p.hasPermission("betterreset.backups")) { Messages.send(p, plugin.getConfig().getString("messages.noPermission")); return; }
+            if (displayName.startsWith("Delete ALL ")) {
+                String base = displayName.substring("Delete ALL ".length());
+                if (!p.hasPermission("betterreset.backups")) { 
+                    Messages.send(p, plugin.getConfig().getString("messages.noPermission")); 
+                    return; 
+                }
                 openDeleteAllConfirm(p, base);
                 return;
             }
             // Expect format: base @ timestamp
             String base = null, ts = null;
-            List<String> lore = it.getItemMeta().getLore();
-            if (lore != null) {
-                for (String line : lore) {
-                    String s = ChatColor.stripColor(line);
-                    if (s.startsWith("ID:")) {
-                        String[] ids = s.substring(3).split("\\|", 2);
-                        if (ids.length == 2) { base = ids[0]; ts = ids[1]; break; }
+            List<String> lore = TextExtractor.getLoreText(it.getItemMeta());
+            for (String line : lore) {
+                if (line.startsWith("ID:")) {
+                    String[] ids = line.substring(3).split("\\|", 2);
+                    if (ids.length == 2) { 
+                        base = ids[0]; 
+                        ts = ids[1]; 
+                        break; 
                     }
                 }
             }
             if (base == null || ts == null) {
-                String raw = ChatColor.stripColor(it.getItemMeta().getDisplayName());
-                String[] parts = raw.split(" @ ", 2);
-                if (parts.length == 2) { base = parts[0]; ts = parts[1]; }
+                String[] parts = displayName.split(" @ ", 2);
+                if (parts.length == 2) { 
+                    base = parts[0]; 
+                    ts = parts[1]; 
+                }
             }
             if (base != null && ts != null) openBackupOptions(p, base, ts);
             return;
         }
-        if (title.startsWith(TITLE_BACKUP_OPTIONS)) {
+        if (TextExtractor.titleStartsWith(invTitle, TITLE_BACKUP_OPTIONS)) {
             e.setCancelled(true);
-            String raw = ChatColor.stripColor(title.substring(TITLE_BACKUP_OPTIONS.length())); // base @ ts
+            String raw = TextExtractor.getText(invTitle).substring(TextExtractor.getText(TITLE_BACKUP_OPTIONS).length()); // base @ ts
             String[] parts = raw.split(" @ ", 2);
             if (parts.length != 2) { openBackups(p); return; }
             String base = parts[0];
             String ts = parts[1];
+            String dn = TextExtractor.getDisplayName(it.getItemMeta());
             switch (dn) {
                 case "Back" -> openBackups(p);
                 case "Restore ALL" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts); }
@@ -271,28 +550,49 @@ public class GuiManager implements Listener {
             }
             return;
         }
-        if (title.startsWith(TITLE_DELETE_BACKUP)) {
+    if (TextExtractor.titleStartsWith(invTitle, TITLE_DELETE_BACKUP)) {
             e.setCancelled(true);
-            String raw = ChatColor.stripColor(title.substring(TITLE_DELETE_BACKUP.length())); // base @ ts
+            String raw = TextExtractor.getText(invTitle).substring(TextExtractor.getText(TITLE_DELETE_BACKUP).length()); // base @ ts
             String[] parts = raw.split(" @ ", 2);
             if (parts.length != 2) { openBackups(p); return; }
             String base = parts[0];
             String ts = parts[1];
-            switch (dn) {
+            switch (displayName) {
                 case "Confirm Delete" -> { p.closeInventory(); resetService.deleteBackupAsync(p, base, ts); }
                 case "Cancel" -> openBackupOptions(p, base, ts);
             }
             return;
         }
-        if (title.startsWith(ChatColor.DARK_RED + "Delete ALL | ")) {
+        if (TextExtractor.titleStartsWith(invTitle, TextComponents.darkRed("Delete ALL | "))) {
             e.setCancelled(true);
-            String base = ChatColor.stripColor(title.substring((ChatColor.DARK_RED + "Delete ALL | ").length()));
-            switch (dn) {
+            String base = TextExtractor.getText(invTitle).substring(TextExtractor.getText(TextComponents.darkRed("Delete ALL | ")).length());
+            switch (displayName) {
                 case "Confirm Delete All" -> { p.closeInventory(); resetService.deleteAllBackupsForBaseAsync(p, base); }
                 case "Cancel" -> openBackups(p);
             }
             return;
         }
+    }
+
+    private void openSeedSelector(Player p, String base, EnumSet<ResetService.Dimension> dims) {
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.SEED_SELECTOR, TextComponents.darkPurple("Select Seed | ").append(Component.text(base)));
+        Inventory inv = Bukkit.createInventory(holder, 27, holder.getTitle());
+        holder.setInventory(inv);
+        List<Long> seeds = plugin.getSeedHistory().list();
+        int slot = 10;
+        if (seeds.isEmpty()) {
+            inv.setItem(13, namedComponent(Material.PAPER, TextComponents.gray("No recent seeds")));
+        } else {
+            for (int i = 0; i < seeds.size() && slot < 17; i++) {
+                long s = seeds.get(i);
+                inv.setItem(slot++, namedComponent(Material.PAPER, TextComponents.white("[" + i + "] " + s), TextComponents.gray("Click to use")));
+            }
+        }
+        inv.setItem(22, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Type Custom Seed"), TextComponents.gray("Opens chat to type")));
+        inv.setItem(26, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        // store context for awaiting seed entry
+        awaitingSeedForWorld.put(p.getUniqueId(), base + ";" + dims.stream().map(Enum::name).collect(Collectors.joining(",")));
+        p.openInventory(inv);
     }
 
     private void openSettings(Player p) {
@@ -303,19 +603,19 @@ public class GuiManager implements Listener {
         double tps = plugin.getConfig().getDouble("preload.tpsThreshold", 18.0);
         int cdSec = plugin.getConfig().getInt("countdown.seconds", 10);
         boolean broadcast = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
-        inv.setItem(0, toggleItem(preload, Material.RESPAWN_ANCHOR, "Preload Enabled"));
-        inv.setItem(1, toggleItem(auto, Material.CLOCK, "Auto-Disable on Low TPS"));
-        inv.setItem(2, named(Material.REDSTONE, ChatColor.WHITE + "TPS Threshold: " + tps, ChatColor.GRAY + "Left -0.5 | Right +0.5"));
-        inv.setItem(3, named(Material.REPEATER, ChatColor.WHITE + "Countdown Seconds: " + cdSec, ChatColor.GRAY + "Left -1 | Right +1 | Shift ±10"));
-        inv.setItem(4, toggleItem(broadcast, Material.BELL, "Broadcast Countdown To All"));
+    inv.setItem(0, toggleItem(preload, Material.RESPAWN_ANCHOR, "Preload Enabled"));
+    inv.setItem(1, toggleItem(auto, Material.CLOCK, "Auto-Disable on Low TPS"));
+    inv.setItem(2, namedComponent(Material.REDSTONE, TextComponents.white("TPS Threshold: " + tps), TextComponents.gray("Left -0.5 | Right +0.5")));
+    inv.setItem(3, namedComponent(Material.REPEATER, TextComponents.white("Countdown Seconds: " + cdSec), TextComponents.gray("Left -1 | Right +1 | Shift ±10")));
+    inv.setItem(4, toggleItem(broadcast, Material.BELL, "Broadcast Countdown To All"));
 
         // Row 2: Confirmation
         boolean req = plugin.getConfig().getBoolean("confirmation.requireConfirm", true);
         long timeout = plugin.getConfig().getLong("confirmation.timeoutSeconds", 15);
         boolean consoleBy = plugin.getConfig().getBoolean("confirmation.consoleBypasses", true);
-        inv.setItem(9, toggleItem(req, Material.BOOK, "Require Confirmation"));
-        inv.setItem(10, named(Material.CLOCK, ChatColor.WHITE + "Confirm Timeout: " + timeout + "s", ChatColor.GRAY + "Left -1 | Right +1 | Shift ±5"));
-        inv.setItem(11, toggleItem(consoleBy, Material.COMMAND_BLOCK, "Console Bypasses Confirm"));
+    inv.setItem(9, toggleItem(req, Material.BOOK, "Require Confirmation"));
+    inv.setItem(10, namedComponent(Material.CLOCK, TextComponents.white("Confirm Timeout: " + timeout + "s"), TextComponents.gray("Left -1 | Right +1 | Shift ±5")));
+    inv.setItem(11, toggleItem(consoleBy, Material.COMMAND_BLOCK, "Console Bypasses Confirm"));
 
         // Row 3: Seeds/Players
         boolean sameSeed = plugin.getConfig().getBoolean("seeds.useSameSeedForAllDimensions", true);
@@ -326,14 +626,14 @@ public class GuiManager implements Listener {
         inv.setItem(18, toggleItem(sameSeed, Material.WHEAT_SEEDS, "Use Same Seed For All Dims"));
         inv.setItem(19, toggleItem(returnSpawn, Material.LODESTONE, "Return Players To New Spawn"));
         inv.setItem(20, toggleItem(forceRespawn, Material.TOTEM_OF_UNDYING, "Force Respawn To New World"));
-        inv.setItem(21, named(Material.CLOCK, ChatColor.WHITE + "Respawn Window: " + respawnWindow + "s", ChatColor.GRAY + "Left -10 | Right +10 | Shift ±60"));
+    inv.setItem(21, namedComponent(Material.CLOCK, TextComponents.white("Respawn Window: " + respawnWindow + "s"), TextComponents.gray("Left -10 | Right +10 | Shift ±60")));
         inv.setItem(22, toggleItem(fresh, Material.MILK_BUCKET, "Fresh Start On Reset"));
 
         // Row 4: Teleport/Limits
         String fallback = plugin.getConfig().getString("teleport.fallbackWorldName", "");
         int maxOnline = plugin.getConfig().getInt("limits.maxOnlineForReset", -1);
-        inv.setItem(27, named(Material.ENDER_PEARL, ChatColor.WHITE + "Fallback World: " + (fallback.isEmpty()?"<auto>":fallback), ChatColor.GRAY + "Click to cycle | Shift for chat"));
-        inv.setItem(28, named(Material.PLAYER_HEAD, ChatColor.WHITE + "Max Online For Reset: " + maxOnline, ChatColor.GRAY + "Left -1 | Right +1 | Shift ±5"));
+    inv.setItem(27, namedComponent(Material.ENDER_PEARL, TextComponents.white("Fallback World: " + (fallback.isEmpty()?"<auto>":fallback)), TextComponents.gray("Click to cycle | Shift for chat")));
+    inv.setItem(28, namedComponent(Material.PLAYER_HEAD, TextComponents.white("Max Online For Reset: " + maxOnline), TextComponents.gray("Left -1 | Right +1 | Shift ±5")));
 
         // Row 5: Backups
         boolean backups = plugin.getConfig().getBoolean("backups.enabled", true);
@@ -341,16 +641,15 @@ public class GuiManager implements Listener {
         int maxTotal = plugin.getConfig().getInt("backups.maxTotal", 50);
         int maxAge = plugin.getConfig().getInt("backups.maxAgeDays", 30);
         int keepNow = plugin.getConfig().getInt("backups.pruneNowKeepPerBase", 2);
-        inv.setItem(36, toggleItem(backups, Material.SHULKER_BOX, "Backups Enabled"));
-        inv.setItem(37, named(Material.BUNDLE, ChatColor.WHITE + "Backups Per Base: " + perBase, ChatColor.GRAY + "Left -1 | Right +1 | Shift ±5"));
-        inv.setItem(38, named(Material.CHEST, ChatColor.WHITE + "Backups Max Total: " + maxTotal, ChatColor.GRAY + "Left -1 | Right +1 | Shift ±10"));
-        inv.setItem(39, named(Material.CLOCK, ChatColor.WHITE + "Backups Max Age: " + maxAge + "d", ChatColor.GRAY + "Left -1 | Right +1 | Shift ±5"));
-        inv.setItem(40, named(Material.SHEARS, ChatColor.WHITE + "PruneNow Keep Per Base: " + keepNow, ChatColor.GRAY + "Left -1 | Right +1"));
+    inv.setItem(36, toggleItem(backups, Material.SHULKER_BOX, "Backups Enabled"));
+    inv.setItem(37, namedComponent(Material.BUNDLE, TextComponents.white("Backups Per Base: " + perBase), TextComponents.gray("Left -1 | Right +1 | Shift ±5")));
+    inv.setItem(38, namedComponent(Material.CHEST, TextComponents.white("Backups Max Total: " + maxTotal), TextComponents.gray("Left -1 | Right +1 | Shift ±10")));
+    inv.setItem(39, namedComponent(Material.CLOCK, TextComponents.white("Backups Max Age: " + maxAge + "d"), TextComponents.gray("Left -1 | Right +1 | Shift ±5")));
+    inv.setItem(40, namedComponent(Material.SHEARS, TextComponents.white("PruneNow Keep Per Base: " + keepNow), TextComponents.gray("Left -1 | Right +1")));
 
         // Row 6: Messages (open message editor via chat)
-        inv.setItem(45, named(Material.PAPER, ChatColor.AQUA + "Edit Messages",
-                ChatColor.GRAY + "Click to edit common messages"));
-        inv.setItem(49, named(Material.ARROW, ChatColor.YELLOW + "Back"));
+    inv.setItem(45, namedComponent(Material.PAPER, TextComponents.aqua("Edit Messages"), TextComponents.gray("Click to edit common messages")));
+    inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
@@ -381,19 +680,14 @@ public class GuiManager implements Listener {
     }
 
     private void openMessagesEditor(Player p) {
-        Inventory inv = Bukkit.createInventory(p, 27, ChatColor.AQUA + "Messages");
-        inv.setItem(10, named(Material.PAPER, ChatColor.WHITE + "noPermission",
-                ChatColor.GRAY + plugin.getConfig().getString("messages.noPermission", ""), ChatColor.YELLOW + "Click to edit"));
-        inv.setItem(11, named(Material.PAPER, ChatColor.WHITE + "confirmationWarning",
-                ChatColor.GRAY + "Click to edit"));
-        inv.setItem(12, named(Material.PAPER, ChatColor.WHITE + "confirmationHowTo",
-                ChatColor.GRAY + "Click to edit"));
-        inv.setItem(13, named(Material.PAPER, ChatColor.WHITE + "countdownTitle",
-                ChatColor.GRAY + plugin.getConfig().getString("messages.countdownTitle", ""), ChatColor.YELLOW + "Click to edit"));
-        inv.setItem(14, named(Material.PAPER, ChatColor.WHITE + "countdownSubtitle",
-                ChatColor.GRAY + plugin.getConfig().getString("messages.countdownSubtitle", ""), ChatColor.YELLOW + "Click to edit"));
-        inv.setItem(22, named(Material.ARROW, ChatColor.YELLOW + "Back"));
-        p.openInventory(inv);
+    Inventory inv = Bukkit.createInventory(p, 27, TextComponents.aqua("Messages"));
+    inv.setItem(10, namedComponent(Material.PAPER, TextComponents.white("noPermission"), TextComponents.gray(plugin.getConfig().getString("messages.noPermission", "")), TextComponents.yellow("Click to edit")));
+    inv.setItem(11, namedComponent(Material.PAPER, TextComponents.white("confirmationWarning"), TextComponents.gray("Click to edit")));
+    inv.setItem(12, namedComponent(Material.PAPER, TextComponents.white("confirmationHowTo"), TextComponents.gray("Click to edit")));
+    inv.setItem(13, namedComponent(Material.PAPER, TextComponents.white("countdownTitle"), TextComponents.gray(plugin.getConfig().getString("messages.countdownTitle", "")), TextComponents.yellow("Click to edit")));
+    inv.setItem(14, namedComponent(Material.PAPER, TextComponents.white("countdownSubtitle"), TextComponents.gray(plugin.getConfig().getString("messages.countdownSubtitle", "")), TextComponents.yellow("Click to edit")));
+    inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+    p.openInventory(inv);
     }
 
     private void flip(Player p, String path) {
@@ -438,22 +732,21 @@ public class GuiManager implements Listener {
         openSettings(p);
     }
 
-    @EventHandler
-    public void onChat(AsyncPlayerChatEvent e) {
-        UUID id = e.getPlayer().getUniqueId();
+    // VersionCompat -> ChatMessage handler
+    private void onChatMessage(VersionCompat.ChatMessage msg) {
+        UUID id = msg.getPlayer().getUniqueId();
         // Seed prompt
         String base = awaitingSeedForWorld.get(id);
         if (base != null) {
-            e.setCancelled(true);
-            String msg = e.getMessage().trim();
+            String text = msg.getMessageText().trim();
             Optional<Long> seed = Optional.empty();
-            if (!msg.equalsIgnoreCase("random")) {
-                try { seed = Optional.of(Long.parseLong(msg)); }
-                catch (NumberFormatException ex) { Messages.send(e.getPlayer(), "&cInvalid seed. Type a number or 'random'."); return; }
+            if (!text.equalsIgnoreCase("random")) {
+                try { seed = Optional.of(Long.parseLong(text)); }
+                catch (NumberFormatException ex) { Messages.send(msg.getPlayer(), "&cInvalid seed. Type a number or 'random'."); return; }
             }
             awaitingSeedForWorld.remove(id);
             EnumSet<ResetService.Dimension> dims = selectedDims.getOrDefault(id, EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END));
-            Player p = e.getPlayer();
+            Player p = msg.getPlayer();
             final EnumSet<ResetService.Dimension> dimsCopy = EnumSet.copyOf(dims);
             final String finalBase = base;
             final Optional<Long> seedFinal = seed;
@@ -463,13 +756,12 @@ public class GuiManager implements Listener {
         // Config string prompt
         String path = awaitingConfigPath.get(id);
         if (path != null) {
-            e.setCancelled(true);
-            String msg = e.getMessage().trim();
-            if (path.equals("teleport.fallbackWorldName") && msg.equalsIgnoreCase("none")) msg = "";
-            plugin.getConfig().set(path, msg);
+            String text = msg.getMessageText().trim();
+            if (path.equals("teleport.fallbackWorldName") && text.equalsIgnoreCase("none")) text = "";
+            plugin.getConfig().set(path, text);
             plugin.saveConfig();
             awaitingConfigPath.remove(id);
-            Bukkit.getScheduler().runTask(plugin, () -> openSettings(e.getPlayer()));
+            Bukkit.getScheduler().runTask(plugin, () -> openSettings(msg.getPlayer()));
         }
     }
 
@@ -480,22 +772,13 @@ public class GuiManager implements Listener {
     }
 
     private static ItemStack toggleItem(boolean on, Material mat, String name) {
-        ItemStack it = new ItemStack(on ? mat : Material.BARRIER);
-        ItemMeta m = it.getItemMeta();
-        m.setDisplayName(ChatColor.WHITE + name);
-        m.setLore(Collections.singletonList(on ? ChatColor.GREEN + "[ON]" : ChatColor.RED + "[OFF]"));
-        it.setItemMeta(m);
-        return it;
+        Material use = on ? mat : Material.BARRIER;
+        Component title = TextComponents.white(name);
+        Component state = on ? TextComponents.green("[ON]") : TextComponents.red("[OFF]");
+    return GuiHolderComponents.namedComponent(use, title, state);
     }
 
-    private static ItemStack named(Material mat, String name, String... lore) {
-        ItemStack it = new ItemStack(mat);
-        ItemMeta m = it.getItemMeta();
-        m.setDisplayName(name);
-        if (lore != null && lore.length > 0) m.setLore(Arrays.asList(lore));
-        it.setItemMeta(m);
-        return it;
-    }
+    // ...existing code... (removed legacy named helper - use namedComponent instead)
 
     private static String human(long bytes) {
         String[] u = {"B","KB","MB","GB","TB"};

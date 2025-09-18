@@ -13,11 +13,9 @@ import java.util.List;
  * and delegates to FullResetCommand for functionality.
  */
 public class LegacyFullResetCommand implements CommandExecutor, TabCompleter {
-    private final FullResetPlugin plugin;
     private final FullResetCommand delegate;
 
     public LegacyFullResetCommand(FullResetPlugin plugin, FullResetCommand delegate) {
-        this.plugin = plugin;
         this.delegate = delegate;
     }
 

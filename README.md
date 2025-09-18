@@ -1,14 +1,7 @@
 # 🔁 BetterReset — Live Overworld/Nether/End Reset
 
-<div align="center">
-
-![Minecraft](https://img.shields.io/badge/Minecraft-1.21.x%2B-brightgreen?style=for-the-badge&logo=minecraft)
-![API](https://img.shields.io/badge/API-Paper%2FSpigot_1.21%2B-blue?style=for-the-badge)
-![Java](https://img.shields.io/badge/Java-17%2B-orange?style=for-the-badge&logo=openjdk)
-![Status](https://img.shields.io/badge/Status-Production_Ready-success?style=for-the-badge)
-![MV](https://img.shields.io/badge/Multiverse-Soft_Depend-9cf?style=for-the-badge)
-
-</div>
+<!-- Badges -->
+![Minecraft](https://img.shields.io/badge/Minecraft-1.21.x%2B-brightgreen?style=for-the-badge&logo=minecraft) ![API](https://img.shields.io/badge/API-Paper%2FSpigot_1.21%2B-blue?style=for-the-badge) ![Java](https://img.shields.io/badge/Java-17%2B-orange?style=for-the-badge&logo=openjdk) ![Status](https://img.shields.io/badge/Status-Production_Ready-success?style=for-the-badge) ![MV](https://img.shields.io/badge/Multiverse-Soft_Depend-9cf?style=for-the-badge)
 
 ---
 
@@ -48,14 +41,14 @@ Root: `/betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsam
 
 | Command | Description | Permission | Default |
 |:--|:--|:--|:--|
-| `/betterreset fullreset <world> [confirm|--confirm] [--seed <long>|--seed random] [--force]` | Reset Overworld+Nether+End for `<world>` | `betterreset.use` | OP |
+| `/betterreset fullreset &lt;world&gt; [confirm\|--confirm] [--seed &lt;long&gt;\|--seed random] [--force]` | Reset Overworld+Nether+End for `&lt;world&gt;` | `betterreset.use` | OP |
 | `/betterreset gui` | Open GUI world selector + confirm | `betterreset.gui` | OP |
 | `/betterreset reload` | Reload config/messages | `betterreset.reload` | OP |
 | `/betterreset creator` | Show clickable donation link | `betterreset.creator` | Everyone |
 | `/betterreset status` | Show current state (IDLE/COUNTDOWN/RUNNING) | `betterreset.status` | Everyone |
 | `/betterreset cancel` | Cancel active countdown | `betterreset.cancel` | OP |
-| `/betterreset fallback <world|none>` | Set fallback world | `betterreset.fallback` | OP |
-| `/betterreset seedsame <true|false>` | Toggle same-seed policy | `betterreset.seedsame` | OP |
+| `/betterreset fallback &lt;world&gt;\|none` | Set fallback world | `betterreset.fallback` | OP |
+| `/betterreset seedsame &lt;true\|false&gt;` | Toggle same-seed policy | `betterreset.seedsame` | OP |
 | `/betterreset listworlds` | List loaded base worlds | `betterreset.listworlds` | Everyone |
 | `/betterreset about` | Show plugin version/author | `betterreset.about` | Everyone |
 
@@ -95,6 +88,7 @@ teleport:
   fallbackWorldName: ""
 
 limits:
+
   maxOnlineForReset: -1  # -1 disables the check
 
 messages:
@@ -127,11 +121,7 @@ BetterReset doesn’t require Multiverse-Core. If present, the plugin tries (via
 
 Open in-game with `/betterreset creator` or click below:
 
-<div align="center">
-
 [![Donate](https://img.shields.io/badge/%F0%9F%92%96_Donate-Support_Development-ff69b4?style=for-the-badge)](https://donate.stripe.com/8x29AT0H58K03judnR0Ba01)
-
-</div>
 
 ---
 
