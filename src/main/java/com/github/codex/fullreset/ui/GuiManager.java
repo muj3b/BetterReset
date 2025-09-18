@@ -744,13 +744,28 @@ public class GuiManager implements Listener {
                 try { seed = Optional.of(Long.parseLong(text)); }
                 catch (NumberFormatException ex) { Messages.send(msg.getPlayer(), "&cInvalid seed. Type a number or 'random'."); return; }
             }
+            // awaitingSeedForWorld may be stored either as just the base name, or as "base;DIM1,DIM2" when opened from the seed selector.
             awaitingSeedForWorld.remove(id);
+            String ctx = base;
+            String finalBase = ctx;
             EnumSet<ResetService.Dimension> dims = selectedDims.getOrDefault(id, EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END));
+            // If context contains a semicolon, parse dims from it
+            if (ctx.contains(";")) {
+                String[] parts = ctx.split(";", 2);
+                finalBase = parts[0];
+                if (parts.length > 1 && parts[1] != null && !parts[1].isEmpty()) {
+                    try {
+                        EnumSet<ResetService.Dimension> parsed = EnumSet.noneOf(ResetService.Dimension.class);
+                        for (String s : parts[1].split(",")) parsed.add(ResetService.Dimension.valueOf(s));
+                        dims = parsed;
+                    } catch (Exception ignored) {}
+                }
+            }
             Player p = msg.getPlayer();
-            final EnumSet<ResetService.Dimension> dimsCopy = EnumSet.copyOf(dims);
-            final String finalBase = base;
-            final Optional<Long> seedFinal = seed;
-            Bukkit.getScheduler().runTask(plugin, () -> resetService.startResetWithCountdown(p, finalBase, seedFinal, dimsCopy));
+            final EnumSet<ResetService.Dimension> dimsForTask = EnumSet.copyOf(dims);
+            final Optional<Long> seedForTask = seed;
+            final String baseForTask = finalBase;
+            Bukkit.getScheduler().runTask(plugin, () -> resetService.startResetWithCountdown(p, baseForTask, seedForTask, dimsForTask));
             return;
         }
         // Config string prompt

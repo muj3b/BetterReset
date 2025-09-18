@@ -112,7 +112,8 @@ public class ResetService {
             seconds,
             () -> {
                 if (!task.isCancelled()) {
-                    performReset(task);
+                    // Use the newer, more robust reset flow which resolves folders and fallbacks
+                    resetWorldAsync(task.getInitiator(), baseWorld, Optional.empty(), dimensions);
                     lastResetAt.put(baseWorld, System.currentTimeMillis());
                 }
             }
@@ -150,7 +151,8 @@ public class ResetService {
             seconds,
             () -> {
                 if (!task.isCancelled()) {
-                    performReset(task);
+                    // Delegate to async reset which handles fallback selection and folder resolution
+                    resetWorldAsync(task.getInitiator(), baseWorld, seedOpt, dimensions);
                     lastResetAt.put(baseWorld, System.currentTimeMillis());
                 }
             }
@@ -174,12 +176,8 @@ public class ResetService {
             // There is no Messages.broadcast helper; send to console directly
             Messages.send(Bukkit.getConsoleSender(), "&eConsole initiated reset for " + baseWorld);
             // For console, run immediate reset without countdown
-            List<World> affectedWorlds = dims.stream()
-                .flatMap(dim -> getAffectedWorld(baseWorld, dim).stream())
-                .toList();
-            ResetTask task = new ResetTask(baseWorld, dims, null, seed.orElse(null), affectedWorlds);
-            // Use plugin background executor for async reset work
-            plugin.getBackgroundExecutor().submit(() -> performReset(task));
+            // Use the centralized reset flow (it will schedule work on the main thread and background executor)
+            resetWorldAsync(Bukkit.getConsoleSender(), baseWorld, seed);
         }
     }
 
@@ -192,98 +190,9 @@ public class ResetService {
         return Optional.ofNullable(Bukkit.getWorld(worldName));
     }
 
-    private void performReset(ResetTask task) {
-        if (task.isCancelled()) {
-            return;
-        }
+    
 
-        // Save all players
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            player.saveData();
-        }
-
-        // Move players to safety
-        String fallback = plugin.getConfig().getString("teleport.fallbackWorldName", "");
-        World fallbackWorld = !fallback.isEmpty() ? Bukkit.getWorld(fallback) : null;
-
-        if (fallbackWorld == null) {
-            fallbackWorld = Bukkit.getWorlds().get(0);
-        }
-
-        Location fallbackSpawn = fallbackWorld.getSpawnLocation();
-        for (World world : task.getAffectedWorlds()) {
-            for (Player player : world.getPlayers()) {
-                player.teleport(fallbackSpawn);
-            }
-        }
-
-        // Unload worlds
-        for (World world : task.getAffectedWorlds()) {
-            Bukkit.unloadWorld(world, true);
-        }
-
-        // Let the async deletion and regeneration happen in a separate thread
-        // Execute deletion/regeneration using plugin background executor to control thread pool
-        plugin.getBackgroundExecutor().submit(() -> {
-            try {
-                // Delete world files
-                for (World world : task.getAffectedWorlds()) {
-                    File worldFolder = world.getWorldFolder();
-                    if (worldFolder.exists()) {
-                        deleteWorldFolder(worldFolder);
-                    }
-                }
-
-                // Regenerate worlds on main thread
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    regenerateWorlds(task);
-                    resetInProgress = false;
-                    currentTarget = null;
-                    phase = "IDLE";
-                    Messages.send(task.getInitiator(), "&aReset complete!");
-                    try {
-                        totalResets++;
-                        lastResetTimestamp.put(task.getBaseWorld(), System.currentTimeMillis());
-                    } catch (Exception ignored) {}
-                });
-            } catch (Exception e) {
-                e.printStackTrace();
-                Messages.send(task.getInitiator(), "&cError during reset: " + e.getMessage());
-            }
-        });
-    }
-
-    private void deleteWorldFolder(File folder) throws IOException {
-        deletePath(folder.toPath());
-    }
-
-    private void regenerateWorlds(ResetTask task) {
-        for (World world : task.getAffectedWorlds()) {
-            WorldCreator creator = new WorldCreator(world.getName());
-            if (task.getCustomSeed().isPresent()) {
-                creator.seed(task.getCustomSeed().get());
-            }
-            creator.environment(world.getEnvironment());
-            creator.type(WorldType.NORMAL);
-            World newWorld = creator.createWorld();
-            if (newWorld == null) {
-                Messages.send(task.getInitiator(), "&cFailed to regenerate world: " + world.getName());
-                continue;
-            }
-        }
-
-        if (plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true)) {
-            World overworld = Bukkit.getWorld(task.getBaseWorld());
-            if (overworld != null) {
-                Location spawn = overworld.getSpawnLocation();
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    if (player.hasPermission("betterreset.use")) {
-                        player.teleport(spawn);
-                    }
-                }
-            }
-        }
-    }
+    
 
     
     public void resetWorldAsync(CommandSender initiator, String baseWorldName, Optional<Long> seedOpt) {
@@ -820,7 +729,8 @@ public class ResetService {
             p.getInventory().clear();
             p.getEnderChest().clear();
             p.setFireTicks(0);
-            double maxHealth = p.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
+            var attr = p.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH);
+            double maxHealth = (attr != null) ? attr.getValue() : 20.0;
             p.setHealth(Math.min(maxHealth, 20.0));
             p.setFoodLevel(20);
             p.setSaturation(5f);
