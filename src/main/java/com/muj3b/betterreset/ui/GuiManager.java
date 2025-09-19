@@ -44,6 +44,10 @@ public class GuiManager implements Listener {
     private final Map<UUID, String> awaitingConfigPath = new HashMap<>();
     private final Map<UUID, String> selectedBase = new HashMap<>();
     private final Map<UUID, EnumSet<ResetService.Dimension>> selectedDims = new HashMap<>();
+    // track per-player selected backup (base -> timestamp)
+    private final Map<UUID, BackupSelection> selectedBackup = new HashMap<>();
+
+    private static record BackupSelection(String base, String timestamp) {}
 
     public GuiManager(FullResetPlugin plugin, ResetService resetService) {
         this.plugin = plugin;
@@ -182,7 +186,14 @@ public class GuiManager implements Listener {
             lore.add(TextComponents.gray("Click to restore"));
             ItemStack item = new ItemStack(Material.CHEST);
             ItemMeta im = item.getItemMeta();
-            if (im != null) { im.displayName(label); im.lore(lore); item.setItemMeta(im); }
+            if (im != null) {
+                im.displayName(label);
+                im.lore(lore);
+                // store persistent metadata so handlers don't need to parse display names
+                im.getPersistentDataContainer().set(new NamespacedKey(plugin, "backup_base"), PersistentDataType.STRING, ref.base());
+                im.getPersistentDataContainer().set(new NamespacedKey(plugin, "backup_timestamp"), PersistentDataType.STRING, ref.timestamp());
+                item.setItemMeta(im);
+            }
             inv.setItem(slot++, item);
         }
         inv.setItem(49, namedComponent(Material.SHEARS, TextComponents.red("Prune Now")));
@@ -201,11 +212,18 @@ public class GuiManager implements Listener {
         inv.setItem(16, namedComponent(Material.END_STONE, TextComponents.white("Restore End")));
         inv.setItem(20, namedComponent(Material.TNT, TextComponents.red("Delete Backup")));
         inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
-        ItemMeta meta = inv.getItem(10).getItemMeta();
-        if (meta != null) {
-            meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "backup_timestamp"), PersistentDataType.STRING, ts);
-            inv.getItem(10).setItemMeta(meta);
+        // attach timestamp/base to all actionable items
+        for (int idx : new int[]{10,12,14,16,20}) {
+            ItemStack it = inv.getItem(idx);
+            if (it == null) continue;
+            ItemMeta m = it.getItemMeta();
+            if (m == null) continue;
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "backup_timestamp"), PersistentDataType.STRING, ts);
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "backup_base"), PersistentDataType.STRING, base);
+            it.setItemMeta(m);
         }
+        // remember per-player selection so delete-confirm can read without parsing title
+        selectedBackup.put(p.getUniqueId(), new BackupSelection(base, ts));
         p.openInventory(inv);
     }
 
@@ -262,6 +280,11 @@ public class GuiManager implements Listener {
         if (displayName.equalsIgnoreCase("Back")) { openMain(p); return; }
         if (displayName.equalsIgnoreCase("Prune Now")) { p.performCommand("betterreset prune --confirm"); return; }
         if (displayName.startsWith("Delete ALL ")) { String base = displayName.substring("Delete ALL ".length()); openDeleteAllConfirm(p, base); return; }
+        // Prefer persistent metadata for reliability
+        String base = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_base"), PersistentDataType.STRING);
+        String ts = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_timestamp"), PersistentDataType.STRING);
+        if (base != null && ts != null) { openBackupOptions(p, base, ts); return; }
+        // Fallback to parsing the display name if metadata is missing
         String dn = PlainTextComponentSerializer.plainText().serialize(meta.displayName());
         String[] parts = dn.split(" @ ", 2);
         if (parts.length == 2) openBackupOptions(p, parts[0], parts[1]);
@@ -269,7 +292,8 @@ public class GuiManager implements Listener {
 
     private void handleBackupOptionsClick(Player p, String displayName, ItemMeta meta) {
         String ts = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_timestamp"), PersistentDataType.STRING);
-        String base = selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName()));
+        String base = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_base"), PersistentDataType.STRING);
+        if (base == null) base = selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName()));
         if (ts == null) ts = "";
         switch (displayName) {
             case "Back" -> openBackups(p);
@@ -283,11 +307,17 @@ public class GuiManager implements Listener {
     }
 
     private void handleDeleteBackupClick(Player p, String displayName, ItemMeta meta) {
-        String invTitle = PlainTextComponentSerializer.plainText().serialize(((GuiHolder) p.getOpenInventory().getTopInventory().getHolder()).getTitle());
-        String raw = invTitle.replace(PlainTextComponentSerializer.plainText().serialize(TITLE_DELETE_BACKUP), "");
-        String[] parts = raw.split(" @ ", 2);
-        if (parts.length != 2) { openBackups(p); return; }
-        String base = parts[0]; String ts = parts[1];
+        // prefer per-player selected backup if present
+        BackupSelection sel = selectedBackup.get(p.getUniqueId());
+        String base = null; String ts = null;
+        if (sel != null) { base = sel.base(); ts = sel.timestamp(); }
+        if (base == null || ts == null) {
+            String invTitle = PlainTextComponentSerializer.plainText().serialize(((GuiHolder) p.getOpenInventory().getTopInventory().getHolder()).getTitle());
+            String raw = invTitle.replace(PlainTextComponentSerializer.plainText().serialize(TITLE_DELETE_BACKUP), "");
+            String[] parts = raw.split(" @ ", 2);
+            if (parts.length != 2) { openBackups(p); return; }
+            base = parts[0]; ts = parts[1];
+        }
         switch (displayName) {
             case "Confirm Delete" -> { p.closeInventory(); resetService.deleteBackupAsync(p, base, ts); }
             case "Cancel" -> openBackupOptions(p, base, ts);

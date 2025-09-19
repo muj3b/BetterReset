@@ -49,6 +49,10 @@ public class BackupManager {
                 meta.store(os, "BetterReset backup metadata");
             }
         } catch (Exception ignored) {}
+        // mark snapshot as complete so callers can verify a full successful snapshot
+        try {
+            Files.createFile(destBase.resolve(".complete"));
+        } catch (Exception ignored) {}
         plugin.getLogger().info("Snapshot saved: " + destBase + " (" + human(totalBytes) + ")");
         prune(base);
         return stamp;
@@ -63,7 +67,14 @@ public class BackupManager {
                     if (!Files.isDirectory(base)) continue;
                     try (DirectoryStream<Path> times = Files.newDirectoryStream(base)) {
                         for (Path ts : times) {
-                            if (Files.isDirectory(ts)) out.add(new BackupRef(base.getFileName().toString(), ts.getFileName().toString(), ts));
+                            if (!Files.isDirectory(ts)) continue;
+                            // Only include backups that have the ".complete" marker file
+                            if (Files.exists(ts.resolve(".complete"))) {
+                                out.add(new BackupRef(base.getFileName().toString(), ts.getFileName().toString(), ts));
+                            } else {
+                                // Optional: skip noisy logs. Uncomment if you want to see skipped entries.
+                                // plugin.getLogger().fine("Skipping incomplete backup: " + ts);
+                            }
                         }
                     }
                 }
