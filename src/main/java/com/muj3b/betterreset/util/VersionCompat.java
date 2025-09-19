@@ -2,7 +2,6 @@ package com.muj3b.betterreset.util;
 
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
-import com.muj3b.betterreset.util.TextExtractor;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
