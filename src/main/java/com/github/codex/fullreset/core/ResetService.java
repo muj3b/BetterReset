@@ -98,8 +98,14 @@ public class ResetService {
             .flatMap(dim -> getAffectedWorld(baseWorld, dim).stream())
             .toList();
 
+        // Determine effective seed early so preload uses the same one
+        Optional<Long> effectiveSeed = Optional.of(new Random().nextLong());
+
+        // Preload temporary worlds (if enabled and TPS good)
+        try { maybePreload(baseWorld, effectiveSeed.get(), dimensions); } catch (Throwable ignored) {}
+
         // Create the reset task
-        ResetTask task = new ResetTask(baseWorld, dimensions, player, null, affectedWorlds);
+        ResetTask task = new ResetTask(baseWorld, dimensions, player, effectiveSeed.orElse(null), affectedWorlds);
         activeTasks.put(player.getUniqueId(), task);
 
         // Start countdown
@@ -113,7 +119,7 @@ public class ResetService {
             () -> {
                 if (!task.isCancelled()) {
                     // Use the newer, more robust reset flow which resolves folders and fallbacks
-                    resetWorldAsync(task.getInitiator(), baseWorld, Optional.empty(), dimensions);
+                    resetWorldAsync(task.getInitiator(), baseWorld, effectiveSeed, dimensions);
                     lastResetAt.put(baseWorld, System.currentTimeMillis());
                 }
             }
@@ -138,8 +144,14 @@ public class ResetService {
             .flatMap(dim -> getAffectedWorld(baseWorld, dim).stream())
             .toList();
 
+        // Choose effective seed once so preload and recreate use the same value
+        Optional<Long> effectiveSeed = seedOpt.isPresent() ? seedOpt : Optional.of(rng.nextLong());
+
+        // Preload temp worlds for faster swap (if enabled and TPS is OK)
+        try { maybePreload(baseWorld, effectiveSeed.get(), dimensions); } catch (Throwable ignored) {}
+
         // ResetTask stores a boxed Long for the custom seed; convert Optional -> Long (or null)
-    ResetTask task = new ResetTask(baseWorld, dimensions, player, seedOpt.orElse(null), affectedWorlds);
+        ResetTask task = new ResetTask(baseWorld, dimensions, player, effectiveSeed.orElse(null), affectedWorlds);
         activeTasks.put(player.getUniqueId(), task);
 
         int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
@@ -152,7 +164,7 @@ public class ResetService {
             () -> {
                 if (!task.isCancelled()) {
                     // Delegate to async reset which handles fallback selection and folder resolution
-                    resetWorldAsync(task.getInitiator(), baseWorld, seedOpt, dimensions);
+                    resetWorldAsync(task.getInitiator(), baseWorld, effectiveSeed, dimensions);
                     lastResetAt.put(baseWorld, System.currentTimeMillis());
                 }
             }
@@ -385,6 +397,9 @@ public class ResetService {
                     Messages.send(online, "&a[BetterReset]&7 World '&e" + base + "&7' has been reset.");
                 }
             }
+            // Update stats
+            totalResets++;
+            lastResetTimestamp.put(base, System.currentTimeMillis());
             auditLogger.log(plugin, "Reset completed for '" + base + "'");
             resetInProgress = false;
             phase = "IDLE";
@@ -805,6 +820,26 @@ public class ResetService {
                 try { moveWithFallback(prepFolder.toPath(), targetFolder.toPath()); } catch (Exception ignored) {}
             }
         }
+    }
+
+    private void maybePreload(String baseWorld, long seed, EnumSet<Dimension> dims) {
+        try {
+            if (!plugin.getConfig().getBoolean("preload.enabled", true)) return;
+            if (plugin.getConfig().getBoolean("preload.autoDisableHighLag", true)) {
+                // Paper-only TPS check; guard with reflection
+                try {
+                    double[] tps = (double[]) Bukkit.getServer().getClass().getMethod("getTPS").invoke(Bukkit.getServer());
+                    double minTps = plugin.getConfig().getDouble("preload.tpsThreshold", 18.0);
+                    if (tps != null && tps.length > 0 && tps[0] < minTps) return;
+                } catch (Throwable ignored) {}
+            }
+            // Map dimensions for the PreloadManager
+            EnumSet<com.github.codex.fullreset.util.PreloadManager.Dimension> pdims = EnumSet.noneOf(com.github.codex.fullreset.util.PreloadManager.Dimension.class);
+            if (dims.contains(Dimension.OVERWORLD)) pdims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.OVERWORLD);
+            if (dims.contains(Dimension.NETHER)) pdims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.NETHER);
+            if (dims.contains(Dimension.END)) pdims.add(com.github.codex.fullreset.util.PreloadManager.Dimension.END);
+            preloadManager.preload(baseWorld, seed, pdims);
+        } catch (Throwable ignored) {}
     }
 
     private void moveWithFallback(Path src, Path dst) throws IOException, InterruptedException {

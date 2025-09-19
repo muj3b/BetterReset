@@ -6,10 +6,6 @@ confirmation:
   # How long the confirmation is valid (seconds)
   timeoutSeconds: 15
 
-seeds:
-  # If true, use the same seed for overworld/nether/end when a seed is provided or generated.
-  useSameSeedForAllDimensions: true
-
 players:
   # After reset and recreation, return affected players to the new overworld spawn
   returnToNewSpawnAfterReset: true
@@ -19,6 +15,13 @@ players:
   respawnRecentWindowSeconds: 600
   # Clear inventories, XP, hunger, health when moved into the fresh world
   freshStartOnReset: true
+  
+# General limits and safety gates
+limits:
+  # Prevent resets if more than this many players are online (-1 to disable)
+  maxOnlineForReset: -1
+  # Prevent repeated resets for the same base world within this many seconds (0 to disable)
+  resetCooldownSeconds: 0
 
 messages:
   noPermission: "&cYou don't have permission to use this command."
@@ -44,9 +47,6 @@ teleport:
   # Name of a safe fallback world to send players before deletion. Leave blank to auto-pick/create.
   fallbackWorldName: ""
 
-limits:
-  # Prevent resets if more than this many players are online (-1 to disable)
-  maxOnlineForReset: -1
 
 confirmation:
   # If true, console commands skip confirmation
@@ -63,3 +63,11 @@ backups:
   maxAgeDays: 30
   # When clicking "Prune Now" in GUI, keep at most this many per base (force policy)
   pruneNowKeepPerBase: 2
+
+# Deletion threading and seed history
+seeds:
+  useSameSeedForAllDimensions: true
+  historyCapacity: 10
+
+deletion:
+  parallelism: 2

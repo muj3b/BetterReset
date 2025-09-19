@@ -10,7 +10,7 @@ softdepend:
 commands:
   betterreset:
     description: BetterReset root command
-    usage: /betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about|prune|deleteallbackups|preload|testreset> [...]
+    usage: /betterreset <fullreset|gui|reload|creator|status|stats|cancel|fallback|seedsame|listworlds|about|prune|deleteallbackups|preload|testreset|seeds> [...]
     aliases: [br]
     permission: betterreset.use
 
@@ -30,6 +30,9 @@ permissions:
   betterreset.status:
     description: Allows /betterreset status
     default: true
+  betterreset.stats:
+    description: Allows /betterreset stats
+    default: true
   betterreset.cancel:
     description: Allows /betterreset cancel (countdown only)
     default: op
@@ -45,6 +48,9 @@ permissions:
   betterreset.about:
     description: Allows /betterreset about
     default: true
+  betterreset.seeds:
+    description: Allows /betterreset seeds <list|use>
+    default: op
   betterreset.bypassconfirm:
     description: Allows bypassing confirmation for /betterreset fullreset
     default: op
