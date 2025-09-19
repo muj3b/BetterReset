@@ -155,7 +155,7 @@ public class GuiManager implements Listener {
         Inventory inv = Bukkit.createInventory(holder, 27, TITLE_SELECT);
         holder.setInventory(inv);
         inv.setItem(13, namedComponent(Material.GRASS_BLOCK, TextComponents.green(base), TextComponents.gray("Click to configure")));
-        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back to Archives")));
         p.openInventory(inv);
     }
 
@@ -182,9 +182,23 @@ public class GuiManager implements Listener {
         LinkedHashSet<String> bases = new LinkedHashSet<>();
         for (var r : refs) bases.add(r.base());
         int hslot = 0;
+        // compute per-base stats
+        Map<String, long[]> baseStats = new LinkedHashMap<>(); // base -> [count, sizeBytes]
+        for (String b : bases) baseStats.put(b, new long[]{0L, 0L});
+        for (var r : refs) {
+            long[] arr = baseStats.get(r.base());
+            if (arr != null) { arr[0] += 1; if (r.sizeBytes() > 0) arr[1] += r.sizeBytes(); }
+        }
         for (String b : bases) {
             if (hslot > 8) break;
-            inv.setItem(hslot++, namedComponent(Material.LAVA_BUCKET, TextComponents.darkRed("Delete ALL " + b), TextComponents.gray("Click to confirm")));
+            long[] arr = baseStats.getOrDefault(b, new long[]{0L,0L});
+            inv.setItem(hslot++, namedComponent(
+                    Material.LAVA_BUCKET,
+                    TextComponents.darkRed("Delete ALL " + b),
+                    TextComponents.gray("Click to confirm"),
+                    TextComponents.gray("Count: ").append(TextComponents.white(String.valueOf(arr[0]))),
+                    TextComponents.gray("Size: ").append(TextComponents.white(human(arr[1])))
+            ));
         }
         long totalBytes = 0L; int totalCount = refs.size();
         int slot = 9;
@@ -327,7 +341,7 @@ public class GuiManager implements Listener {
         if (base == null) base = selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName()));
         if (ts == null) ts = "";
         switch (displayName) {
-            case "Back" -> openBackups(p);
+            case "Back", "Back to Archives" -> openBackups(p);
             case "Restore ALL" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts); }
             case "Restore Overworld" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.OVERWORLD)); }
             case "Restore Nether" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.NETHER)); }
@@ -428,6 +442,7 @@ public class GuiManager implements Listener {
             case "Return to New Spawn" -> { flip(p, "players.returnToNewSpawnAfterReset"); return; }
             case "Force Respawn To New" -> { flip(p, "players.forceRespawnToNewOverworld"); return; }
             case "Fresh Start On Reset" -> { flip(p, "players.freshStartOnReset"); return; }
+            case "Messages" -> { openMessages(p); return; }
             default -> { /* ignore */ }
         }
     }
@@ -442,7 +457,16 @@ public class GuiManager implements Listener {
 
     // VersionCompat delivers ChatMessage objects; adapt callback here
     private void onChatMessage(com.muj3b.betterreset.util.VersionCompat.ChatMessage msg) {
-        // Default: do nothing. Implementations can use msg.getPlayer() and msg.getMessage()
+        Player p = msg.getPlayer();
+        UUID id = p.getUniqueId();
+        String path = awaitingConfigPath.remove(id);
+        if (path == null) return;
+        String text = msg.getMessageText();
+        if (text == null) text = "";
+        plugin.getConfig().set(path, text);
+        plugin.saveConfig();
+        Messages.send(p, "&aUpdated &e" + path + "&a to: &r" + text);
+        Bukkit.getScheduler().runTask(plugin, () -> openMessages(p));
     }
 
     // Open the settings GUI (minimal stub to be expanded). Required by click handlers.
@@ -462,7 +486,28 @@ public class GuiManager implements Listener {
         inv.setItem(13, toggleItem(returnSpawn, Material.COMPASS, "Return to New Spawn"));
         inv.setItem(14, toggleItem(forceRespawn, Material.TOTEM_OF_UNDYING, "Force Respawn To New"));
         inv.setItem(15, toggleItem(freshStart, Material.BREAD, "Fresh Start On Reset"));
+        inv.setItem(16, namedComponent(Material.PAPER, TextComponents.white("Messages"), TextComponents.gray("Edit configurable text")));
         inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        p.openInventory(inv);
+    }
+
+    public void openMessages(Player p) {
+        Component title = TextComponents.blue("Messages");
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.MESSAGES, title);
+        Inventory inv = Bukkit.createInventory(holder, 54, title);
+        holder.setInventory(inv);
+        org.bukkit.configuration.ConfigurationSection sec = plugin.getConfig().getConfigurationSection("messages");
+        int slot = 10;
+        if (sec != null) {
+            for (String key : new java.util.TreeSet<>(sec.getKeys(false))) {
+                if (slot >= 44) break;
+                String val = plugin.getConfig().getString("messages." + key, "");
+                inv.setItem(slot++, namedComponent(Material.PAPER, TextComponents.white(key), TextComponents.gray(val)));
+            }
+        } else {
+            inv.setItem(13, namedComponent(Material.BARRIER, TextComponents.red("No messages section")));
+        }
+        inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
