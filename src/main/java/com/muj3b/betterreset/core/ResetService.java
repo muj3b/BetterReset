@@ -33,6 +33,7 @@ public class ResetService {
     public enum Dimension { OVERWORLD, NETHER, END }
 
     private final FullResetPlugin plugin;
+    @SuppressWarnings("unused")
     private final ConfirmationManager confirmationManager;
     private final CountdownManager countdownManager;
     private final MultiverseCompat multiverseCompat;

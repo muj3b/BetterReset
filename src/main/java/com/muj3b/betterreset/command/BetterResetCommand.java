@@ -5,8 +5,7 @@ import com.muj3b.betterreset.core.ConfirmationManager;
 import com.muj3b.betterreset.core.ResetService;
 import com.muj3b.betterreset.ui.GuiManager;
 import com.muj3b.betterreset.util.Messages;
-import org.bukkit.Bukkit;
-import org.bukkit.World;
+// removed unused imports
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
