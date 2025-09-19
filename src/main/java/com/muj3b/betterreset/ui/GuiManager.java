@@ -23,6 +23,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.configuration.ConfigurationSection;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -43,6 +44,8 @@ public class GuiManager implements Listener {
 
     private final Map<UUID, String> awaitingSeedForWorld = new HashMap<>();
     private final Map<UUID, String> awaitingConfigPath = new HashMap<>();
+    private final Map<UUID, String> awaitingValueType = new HashMap<>(); // STRING, BOOLEAN, INT, LONG, DOUBLE
+    private final Map<UUID, String> lastSettingsSection = new HashMap<>();
     private final Map<UUID, String> selectedBase = new HashMap<>();
     private final Map<UUID, EnumSet<ResetService.Dimension>> selectedDims = new HashMap<>();
     // track per-player selected backup (base -> timestamp)
@@ -134,6 +137,7 @@ public class GuiManager implements Listener {
             case DELETE_ALL -> handleDeleteAllClick(p, displayName);
             case DELETE_ALL_GLOBAL -> handleDeleteAllGlobalClick(p, displayName);
             case SETTINGS -> handleSettingsClick(p, displayName, e.getClick());
+            case SETTINGS_SECTION -> handleSettingsSectionClick(p, meta);
             case SEED_SELECTOR -> handleSeedSelectorClick(p, displayName);
             case MESSAGES -> handleMessagesClick(p, displayName);
         }
@@ -446,18 +450,22 @@ public class GuiManager implements Listener {
     private void handleSettingsClick(Player p, String dn, org.bukkit.event.inventory.ClickType click) {
         if (dn.equalsIgnoreCase("Back")) { openMain(p); return; }
         switch (dn) {
-            case "Preload Enabled" -> { flip(p, "preload.enabled"); return; }
-            case "Same Seed For All" -> { flip(p, "seeds.useSameSeedForAllDimensions"); return; }
-            case "Broadcast to All" -> { flip(p, "countdown.broadcastToAll"); return; }
-            case "Return to New Spawn" -> { flip(p, "players.returnToNewSpawnAfterReset"); return; }
-            case "Force Respawn To New" -> { flip(p, "players.forceRespawnToNewOverworld"); return; }
-            case "Fresh Start On Reset" -> { flip(p, "players.freshStartOnReset"); return; }
+            case "Confirmation" -> { openSettingsSection(p, "confirmation"); return; }
+            case "Players" -> { openSettingsSection(p, "players"); return; }
+            case "Limits" -> { openSettingsSection(p, "limits"); return; }
+            case "Countdown" -> { openSettingsSection(p, "countdown"); return; }
+            case "Preload" -> { openSettingsSection(p, "preload"); return; }
+            case "Teleport" -> { openSettingsSection(p, "teleport"); return; }
+            case "Backups" -> { openSettingsSection(p, "backups"); return; }
+            case "Seeds" -> { openSettingsSection(p, "seeds"); return; }
+            case "Deletion" -> { openSettingsSection(p, "deletion"); return; }
+            case "Debug" -> { openSettingsSection(p, "debug"); return; }
             case "Messages" -> {
                 if (p.hasPermission("betterreset.messages")) { openMessages(p); }
                 else { Messages.send(p, plugin.getConfig().getString("messages.noPermission","&cYou don't have permission.")); }
                 return;
             }
-            default -> { /* ignore */ }
+            default -> {}
         }
     }
 
@@ -477,33 +485,74 @@ public class GuiManager implements Listener {
         if (path == null) return;
         String text = msg.getMessageText();
         if (text == null) text = "";
-        plugin.getConfig().set(path, text);
-        plugin.saveConfig();
-        Messages.send(p, "&aUpdated &e" + path + "&a to: &r" + text);
-        Bukkit.getScheduler().runTask(plugin, () -> openMessages(p));
+        // Determine expected type
+        String expType = awaitingValueType.remove(id);
+        if (expType == null) {
+            Object cur = plugin.getConfig().get(path);
+            if (cur instanceof Boolean) expType = "BOOLEAN";
+            else if (cur instanceof Integer) expType = "INT";
+            else if (cur instanceof Long) expType = "LONG";
+            else if (cur instanceof Double) expType = "DOUBLE";
+            else expType = "STRING";
+        }
+        boolean ok = true;
+        switch (expType) {
+            case "BOOLEAN" -> {
+                String t = text.trim().toLowerCase(java.util.Locale.ROOT);
+                boolean val = t.equals("true") || t.equals("on") || t.equals("yes") || t.equals("1");
+                plugin.getConfig().set(path, val);
+            }
+            case "INT" -> {
+                try { plugin.getConfig().set(path, Integer.parseInt(text.trim())); }
+                catch (Exception ex) { ok = false; Messages.send(p, "&cInvalid integer: &r" + text); }
+            }
+            case "LONG" -> {
+                try { plugin.getConfig().set(path, Long.parseLong(text.trim())); }
+                catch (Exception ex) { ok = false; Messages.send(p, "&cInvalid long: &r" + text); }
+            }
+            case "DOUBLE" -> {
+                try { plugin.getConfig().set(path, Double.parseDouble(text.trim())); }
+                catch (Exception ex) { ok = false; Messages.send(p, "&cInvalid number: &r" + text); }
+            }
+            default -> {
+                plugin.getConfig().set(path, text);
+            }
+        }
+        if (ok) {
+            plugin.saveConfig();
+            Messages.send(p, "&aUpdated &e" + path + "&a to: &r" + text);
+        }
+        // Reopen appropriate UI
+        if (path.startsWith("messages.")) {
+            Bukkit.getScheduler().runTask(plugin, () -> openMessages(p));
+        } else {
+            String sec = lastSettingsSection.get(id);
+            if (sec == null && path.contains(".")) sec = path.substring(0, path.indexOf('.'));
+            final String reopen = sec;
+            if (reopen != null) Bukkit.getScheduler().runTask(plugin, () -> openSettingsSection(p, reopen));
+        }
     }
 
     // Open the settings GUI (minimal stub to be expanded). Required by click handlers.
     public void openSettings(Player p) {
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS, TITLE_SETTINGS);
-        Inventory inv = Bukkit.createInventory(holder, 27, TITLE_SETTINGS);
+        Inventory inv = Bukkit.createInventory(holder, 54, TITLE_SETTINGS);
         holder.setInventory(inv);
-        boolean preload = plugin.getConfig().getBoolean("preload.enabled", true);
-        boolean sameSeed = plugin.getConfig().getBoolean("seeds.useSameSeedForAllDimensions", true);
-        boolean broadcastAll = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
-        boolean returnSpawn = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
-        boolean forceRespawn = plugin.getConfig().getBoolean("players.forceRespawnToNewOverworld", true);
-        boolean freshStart = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
-        inv.setItem(10, toggleItem(preload, Material.ICE, "Preload Enabled"));
-        inv.setItem(11, toggleItem(sameSeed, Material.WHEAT_SEEDS, "Same Seed For All"));
-        inv.setItem(12, toggleItem(broadcastAll, Material.NOTE_BLOCK, "Broadcast to All"));
-        inv.setItem(13, toggleItem(returnSpawn, Material.COMPASS, "Return to New Spawn"));
-        inv.setItem(14, toggleItem(forceRespawn, Material.TOTEM_OF_UNDYING, "Force Respawn To New"));
-        inv.setItem(15, toggleItem(freshStart, Material.BREAD, "Fresh Start On Reset"));
+        // Categories
+        inv.setItem(10, namedComponent(Material.BOOK, TextComponents.white("Confirmation")));
+        inv.setItem(11, namedComponent(Material.ARMOR_STAND, TextComponents.white("Players")));
+        inv.setItem(12, namedComponent(Material.COMPARATOR, TextComponents.white("Limits")));
+        inv.setItem(13, namedComponent(Material.CLOCK, TextComponents.white("Countdown")));
+        inv.setItem(14, namedComponent(Material.ICE, TextComponents.white("Preload")));
+        inv.setItem(15, namedComponent(Material.ENDER_PEARL, TextComponents.white("Teleport")));
+        inv.setItem(19, namedComponent(Material.CHEST, TextComponents.white("Backups")));
+        inv.setItem(20, namedComponent(Material.WHEAT_SEEDS, TextComponents.white("Seeds")));
+        inv.setItem(21, namedComponent(Material.IRON_PICKAXE, TextComponents.white("Deletion")));
+        inv.setItem(22, namedComponent(Material.REDSTONE, TextComponents.white("Debug")));
         if (p.hasPermission("betterreset.messages")) {
             inv.setItem(16, namedComponent(Material.PAPER, TextComponents.white("Messages"), TextComponents.gray("Edit configurable text")));
         }
-        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
@@ -525,6 +574,104 @@ public class GuiManager implements Listener {
         }
         inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
+    }
+
+    private void openSettingsSection(Player p, String section) {
+        lastSettingsSection.put(p.getUniqueId(), section);
+        Component title = TextComponents.blue("Settings | ").append(Component.text(section));
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS_SECTION, title);
+        Inventory inv = Bukkit.createInventory(holder, 54, title);
+        holder.setInventory(inv);
+        ConfigurationSection cs = plugin.getConfig().getConfigurationSection(section);
+        int slot = 10;
+        if (cs != null) {
+            for (String key : new java.util.TreeSet<>(cs.getKeys(false))) {
+                if (slot >= 44) break;
+                String path = section + "." + key;
+                Object val = plugin.getConfig().get(path);
+                ItemStack item = buildSettingItem(section, key, val);
+                inv.setItem(slot++, item);
+            }
+        } else {
+            inv.setItem(13, namedComponent(Material.BARRIER, TextComponents.red("No such section: "+section)));
+        }
+        inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back to Categories")));
+        inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        p.openInventory(inv);
+    }
+
+    private ItemStack buildSettingItem(String section, String key, Object val) {
+        String path = section + "." + key;
+        Material icon = Material.PAPER;
+        String type = "STRING";
+        Component name = TextComponents.white(key);
+        List<Component> lore = new ArrayList<>();
+        if (val instanceof Boolean b) {
+            icon = b ? Material.LIME_DYE : Material.RED_DYE;
+            type = "BOOLEAN";
+            lore.add(TextComponents.gray("Type: Boolean"));
+            lore.add(TextComponents.gray("Click to toggle"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(b))));
+        } else if (val instanceof Integer i) {
+            icon = Material.COMPARATOR;
+            type = "INT";
+            lore.add(TextComponents.gray("Type: Integer"));
+            lore.add(TextComponents.gray("Click to set via chat"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(i))));
+        } else if (val instanceof Long l) {
+            icon = Material.COMPARATOR;
+            type = "LONG";
+            lore.add(TextComponents.gray("Type: Long"));
+            lore.add(TextComponents.gray("Click to set via chat"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(l))));
+        } else if (val instanceof Double d) {
+            icon = Material.CLOCK;
+            type = "DOUBLE";
+            lore.add(TextComponents.gray("Type: Double"));
+            lore.add(TextComponents.gray("Click to set via chat"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(d))));
+        } else {
+            icon = Material.PAPER;
+            type = "STRING";
+            lore.add(TextComponents.gray("Type: String"));
+            lore.add(TextComponents.gray("Click to set via chat"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(val))));
+        }
+        ItemStack it = new ItemStack(icon);
+        ItemMeta m = it.getItemMeta();
+        if (m != null) {
+            m.displayName(name);
+            m.lore(lore);
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_section"), PersistentDataType.STRING, section);
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_key"), PersistentDataType.STRING, key);
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING, type);
+            it.setItemMeta(m);
+        }
+        return it;
+    }
+
+    private void handleSettingsSectionClick(Player p, ItemMeta meta) {
+        String section = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_section"), PersistentDataType.STRING);
+        String key = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_key"), PersistentDataType.STRING);
+        String type = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING);
+        if (section == null || key == null) return;
+        String path = section + "." + key;
+        switch (type == null ? "STRING" : type) {
+            case "BOOLEAN" -> {
+                boolean cur = plugin.getConfig().getBoolean(path, false);
+                plugin.getConfig().set(path, !cur);
+                plugin.saveConfig();
+                Messages.send(p, (!cur ? "&aEnabled &r" : "&cDisabled &r") + path);
+                openSettingsSection(p, section);
+            }
+            case "INT", "LONG", "DOUBLE", "STRING" -> {
+                awaitingConfigPath.put(p.getUniqueId(), path);
+                awaitingValueType.put(p.getUniqueId(), type);
+                lastSettingsSection.put(p.getUniqueId(), section);
+                Messages.send(p, "&eType new value in chat for &r" + path + " &7(Type: " + type + ")");
+                p.closeInventory();
+            }
+        }
     }
 
     // Flip a boolean config path and notify the player (stub implementation).

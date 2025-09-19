@@ -18,6 +18,7 @@ public class GuiHolder implements InventoryHolder {
         DELETE_ALL,
         DELETE_ALL_GLOBAL,
         SETTINGS,
+        SETTINGS_SECTION,
         MESSAGES
     }
 
