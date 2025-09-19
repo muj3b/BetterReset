@@ -192,13 +192,23 @@ public class GuiManager implements Listener {
         for (String b : bases) {
             if (hslot > 8) break;
             long[] arr = baseStats.getOrDefault(b, new long[]{0L,0L});
-            inv.setItem(hslot++, namedComponent(
-                    Material.LAVA_BUCKET,
-                    TextComponents.darkRed("Delete ALL " + b),
-                    TextComponents.gray("Click to confirm"),
-                    TextComponents.gray("Count: ").append(TextComponents.white(String.valueOf(arr[0]))),
-                    TextComponents.gray("Size: ").append(TextComponents.white(human(arr[1])))
-            ));
+            // Per-base totals item (distinct icon)
+            if (hslot <= 8) {
+                inv.setItem(hslot++, namedComponent(
+                        Material.BARREL,
+                        TextComponents.white("Base: " + b),
+                        TextComponents.gray("Count: ").append(TextComponents.white(String.valueOf(arr[0]))),
+                        TextComponents.gray("Size: ").append(TextComponents.white(human(arr[1])))
+                ));
+            }
+            // Delete ALL for base (keep as separate item)
+            if (hslot <= 8) {
+                inv.setItem(hslot++, namedComponent(
+                        Material.LAVA_BUCKET,
+                        TextComponents.darkRed("Delete ALL " + b),
+                        TextComponents.gray("Click to confirm")
+                ));
+            }
         }
         long totalBytes = 0L; int totalCount = refs.size();
         int slot = 9;
@@ -442,7 +452,11 @@ public class GuiManager implements Listener {
             case "Return to New Spawn" -> { flip(p, "players.returnToNewSpawnAfterReset"); return; }
             case "Force Respawn To New" -> { flip(p, "players.forceRespawnToNewOverworld"); return; }
             case "Fresh Start On Reset" -> { flip(p, "players.freshStartOnReset"); return; }
-            case "Messages" -> { openMessages(p); return; }
+            case "Messages" -> {
+                if (p.hasPermission("betterreset.messages")) { openMessages(p); }
+                else { Messages.send(p, plugin.getConfig().getString("messages.noPermission","&cYou don't have permission.")); }
+                return;
+            }
             default -> { /* ignore */ }
         }
     }
@@ -486,7 +500,9 @@ public class GuiManager implements Listener {
         inv.setItem(13, toggleItem(returnSpawn, Material.COMPASS, "Return to New Spawn"));
         inv.setItem(14, toggleItem(forceRespawn, Material.TOTEM_OF_UNDYING, "Force Respawn To New"));
         inv.setItem(15, toggleItem(freshStart, Material.BREAD, "Fresh Start On Reset"));
-        inv.setItem(16, namedComponent(Material.PAPER, TextComponents.white("Messages"), TextComponents.gray("Edit configurable text")));
+        if (p.hasPermission("betterreset.messages")) {
+            inv.setItem(16, namedComponent(Material.PAPER, TextComponents.white("Messages"), TextComponents.gray("Edit configurable text")));
+        }
         inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }

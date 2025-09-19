@@ -1,5 +1,5 @@
 name: BetterReset
-version: 1.1
+version: 1.1.1
 main: com.muj3b.betterreset.FullResetPlugin
 api-version: '1.21'
 author: muj3b
@@ -50,6 +50,9 @@ permissions:
     default: true
   betterreset.seeds:
     description: Allows /betterreset seeds <list|use>
+    default: op
+  betterreset.messages:
+    description: Allows opening and editing messages via GUI
     default: op
   betterreset.bypassconfirm:
     description: Allows bypassing confirmation for /betterreset fullreset
