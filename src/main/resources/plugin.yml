@@ -1,6 +1,6 @@
 name: BetterReset
 version: 1.0.2
-main: com.github.codex.fullreset.FullResetPlugin
+main: com.muj3b.betterreset.FullResetPlugin
 api-version: '1.21'
 author: muj3b
 description: Reset a world's overworld, nether, and end live with one command.
