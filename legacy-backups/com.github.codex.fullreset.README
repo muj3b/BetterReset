@@ -1,4 +1,0 @@
-This folder contains the original legacy sources from package com.github.codex.fullreset
-They were moved here during migration to com.muj3b.betterreset to avoid duplicate class definitions.
-
-If you need to restore any file, move it back into src/main/java and update package declarations appropriately.
