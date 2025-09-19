@@ -204,7 +204,9 @@ public class GuiManager implements Listener {
             }
             inv.setItem(slot++, item);
         }
-        inv.setItem(49, namedComponent(Material.SHEARS, TextComponents.red("Prune Now")));
+        int keep = 2;
+        try { keep = Math.max(0, plugin.getConfig().getInt("backups.pruneNowKeepPerBase", 2)); } catch (Exception ignored) {}
+        inv.setItem(49, namedComponent(Material.SHEARS, TextComponents.red("Prune ALL (Keep " + keep + ")")));
         inv.setItem(51, namedComponent(Material.TNT, TextComponents.darkRed("Delete ALL Backups"), TextComponents.gray("All bases")));
         inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
@@ -296,7 +298,7 @@ public class GuiManager implements Listener {
 
     private void handleBackupsClick(Player p, String displayName, ItemMeta meta) {
         if (displayName.equalsIgnoreCase("Back")) { openMain(p); return; }
-        if (displayName.equalsIgnoreCase("Prune Now")) { p.performCommand("betterreset prune --confirm"); return; }
+        if (displayName.equalsIgnoreCase("Prune Now") || displayName.startsWith("Prune ALL")) { resetService.pruneBackupsAsync(p, Optional.empty(), true); return; }
         if (displayName.equalsIgnoreCase("Delete ALL Backups")) { openDeleteAllGlobalConfirm(p); return; }
         if (displayName.startsWith("Delete ALL ")) { String base = displayName.substring("Delete ALL ".length()); openDeleteAllConfirm(p, base); return; }
         // Prefer persistent metadata for reliability

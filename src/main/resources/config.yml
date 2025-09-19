@@ -73,5 +73,5 @@ deletion:
   parallelism: 2
 
 debug:
-  gui: false
-  backups: false
+  gui: true
+  backups: true
