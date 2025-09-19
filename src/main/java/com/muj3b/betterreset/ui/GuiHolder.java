@@ -16,6 +16,7 @@ public class GuiHolder implements InventoryHolder {
         BACKUP_OPTIONS,
         DELETE_BACKUP,
         DELETE_ALL,
+        DELETE_ALL_GLOBAL,
         SETTINGS,
         MESSAGES
     }

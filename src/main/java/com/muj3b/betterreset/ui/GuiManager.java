@@ -36,6 +36,7 @@ public class GuiManager implements Listener {
     private static final Component TITLE_BACKUPS = TextComponents.gold("Backups");
     private static final Component TITLE_BACKUP_OPTIONS = TextComponents.gold("Backup | ");
     private static final Component TITLE_DELETE_BACKUP = TextComponents.darkRed("Delete Backup | ");
+    private static final Component TITLE_DELETE_ALL_GLOBAL = TextComponents.darkRed("Delete ALL Backups | ALL BASES");
 
     private final FullResetPlugin plugin;
     private final ResetService resetService;
@@ -107,6 +108,12 @@ public class GuiManager implements Listener {
         String displayName = PlainTextComponentSerializer.plainText().serialize(dnComp);
 
         GuiHolder holder = (GuiHolder) top.getHolder();
+        // Debug logging for GUI clicks
+        if (isGuiDebug()) {
+            String baseMeta = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_base"), PersistentDataType.STRING);
+            String tsMeta = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_timestamp"), PersistentDataType.STRING);
+            plugin.getLogger().info("GUI click: player=" + p.getName() + ", type=" + holder.getType() + ", item=\"" + displayName + "\", base=" + String.valueOf(baseMeta) + ", ts=" + String.valueOf(tsMeta));
+        }
         switch (holder.getType()) {
             case MAIN -> {
                 switch (displayName.toLowerCase(Locale.ROOT)) {
@@ -125,6 +132,7 @@ public class GuiManager implements Listener {
             case BACKUP_OPTIONS -> handleBackupOptionsClick(p, displayName, meta);
             case DELETE_BACKUP -> handleDeleteBackupClick(p, displayName, meta);
             case DELETE_ALL -> handleDeleteAllClick(p, displayName);
+            case DELETE_ALL_GLOBAL -> handleDeleteAllGlobalClick(p, displayName);
             case SETTINGS -> handleSettingsClick(p, displayName, e.getClick());
             case SEED_SELECTOR -> handleSeedSelectorClick(p, displayName);
             case MESSAGES -> handleMessagesClick(p, displayName);
@@ -197,6 +205,7 @@ public class GuiManager implements Listener {
             inv.setItem(slot++, item);
         }
         inv.setItem(49, namedComponent(Material.SHEARS, TextComponents.red("Prune Now")));
+        inv.setItem(51, namedComponent(Material.TNT, TextComponents.darkRed("Delete ALL Backups"), TextComponents.gray("All bases")));
         inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
@@ -247,6 +256,15 @@ public class GuiManager implements Listener {
         p.openInventory(inv);
     }
 
+    private void openDeleteAllGlobalConfirm(Player p) {
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.DELETE_ALL_GLOBAL, TITLE_DELETE_ALL_GLOBAL);
+        Inventory inv = Bukkit.createInventory(holder, 27, TITLE_DELETE_ALL_GLOBAL);
+        holder.setInventory(inv);
+        inv.setItem(11, namedComponent(Material.RED_CONCRETE, TextComponents.darkRed("Confirm Delete ALL")));
+        inv.setItem(15, namedComponent(Material.ARROW, TextComponents.yellow("Cancel")));
+        p.openInventory(inv);
+    }
+
     private void openSeedSelector(Player p, String base, EnumSet<ResetService.Dimension> dims) {
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SEED_SELECTOR, TextComponents.darkPurple("Select Seed | ").append(Component.text(base)));
         Inventory inv = Bukkit.createInventory(holder, 27, holder.getTitle());
@@ -279,6 +297,7 @@ public class GuiManager implements Listener {
     private void handleBackupsClick(Player p, String displayName, ItemMeta meta) {
         if (displayName.equalsIgnoreCase("Back")) { openMain(p); return; }
         if (displayName.equalsIgnoreCase("Prune Now")) { p.performCommand("betterreset prune --confirm"); return; }
+        if (displayName.equalsIgnoreCase("Delete ALL Backups")) { openDeleteAllGlobalConfirm(p); return; }
         if (displayName.startsWith("Delete ALL ")) { String base = displayName.substring("Delete ALL ".length()); openDeleteAllConfirm(p, base); return; }
         // Prefer persistent metadata for reliability
         String base = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_base"), PersistentDataType.STRING);
@@ -362,6 +381,11 @@ public class GuiManager implements Listener {
         }
     }
 
+    private void handleDeleteAllGlobalClick(Player p, String displayName) {
+        if (displayName.equalsIgnoreCase("Cancel")) { openBackups(p); return; }
+        if (displayName.equalsIgnoreCase("Confirm Delete ALL")) { p.closeInventory(); resetService.deleteAllBackupsAsync(p); }
+    }
+
     private void handleMessagesClick(Player p, String displayName) {
         if (displayName.equalsIgnoreCase("Back")) { openSettings(p); return; }
         String path = "messages." + displayName;
@@ -380,6 +404,8 @@ public class GuiManager implements Listener {
         selectedDims.put(p.getUniqueId(), dims);
         openResetOptions(p, base);
     }
+
+    private boolean isGuiDebug() { try { return plugin.getConfig().getBoolean("debug.gui", false); } catch (Exception ignored) { return false; } }
 
     // VersionCompat delivers ChatMessage objects; adapt callback here
     private void onChatMessage(com.muj3b.betterreset.util.VersionCompat.ChatMessage msg) {

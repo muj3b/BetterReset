@@ -66,14 +66,18 @@ public class BackupManager {
                 for (Path base : bases) {
                     if (!Files.isDirectory(base)) continue;
                     try (DirectoryStream<Path> times = Files.newDirectoryStream(base)) {
-                        for (Path ts : times) {
+for (Path ts : times) {
                             if (!Files.isDirectory(ts)) continue;
-                            // Only include backups that have the ".complete" marker file
-                            if (Files.exists(ts.resolve(".complete"))) {
+                            boolean hasComplete = Files.exists(ts.resolve(".complete"));
+                            boolean hasMeta = Files.exists(ts.resolve("meta.properties"));
+                            if (hasComplete && hasMeta) {
                                 out.add(new BackupRef(base.getFileName().toString(), ts.getFileName().toString(), ts));
                             } else {
-                                // Optional: skip noisy logs. Uncomment if you want to see skipped entries.
-                                // plugin.getLogger().fine("Skipping incomplete backup: " + ts);
+                                boolean dbg = false;
+                                try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
+                                if (dbg) {
+                                    plugin.getLogger().info("Skipping backup without markers: " + ts + " (complete=" + hasComplete + ", meta=" + hasMeta + ")");
+                                }
                             }
                         }
                     }
@@ -85,6 +89,8 @@ public class BackupManager {
     }
 
     public void restore(String base, String timestamp) throws IOException {
+        boolean dbg = false; try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
+        if (dbg) plugin.getLogger().info("Restore requested: base=" + base + ", ts=" + timestamp);
         Path src = backupsRoot.resolve(base).resolve(timestamp);
         if (!Files.exists(src) || !Files.isDirectory(src)) throw new IOException("Backup not found: " + src);
         Path worldContainer = Bukkit.getWorldContainer().toPath().toAbsolutePath().normalize();
@@ -102,6 +108,8 @@ public class BackupManager {
     }
 
     public void restore(String base, String timestamp, EnumSet<com.muj3b.betterreset.core.ResetService.Dimension> dims) throws IOException {
+        boolean dbg = false; try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
+        if (dbg) plugin.getLogger().info("Restore requested: base=" + base + ", ts=" + timestamp + ", dims=" + String.valueOf(dims) + "");
         Path src = backupsRoot.resolve(base).resolve(timestamp);
         if (!Files.exists(src) || !Files.isDirectory(src)) throw new IOException("Backup not found: " + src);
         Path worldContainer = Bukkit.getWorldContainer().toPath().toAbsolutePath().normalize();
@@ -205,16 +213,22 @@ public class BackupManager {
     }
 
     public void deleteBackup(String base, String timestamp) throws IOException {
+        boolean dbg = false; try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
+        if (dbg) plugin.getLogger().info("Delete backup: base=" + base + ", ts=" + timestamp);
         Path dir = backupsRoot.resolve(base).resolve(timestamp);
         deleteTree(dir);
     }
 
     public void deleteAllForBase(String base) throws IOException {
+        boolean dbg = false; try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
+        if (dbg) plugin.getLogger().info("Delete ALL for base: base=" + base);
         Path dir = backupsRoot.resolve(base);
         deleteTree(dir);
     }
 
     public void deleteAllBases() throws IOException {
+        boolean dbg = false; try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
+        if (dbg) plugin.getLogger().info("Delete ALL backups for ALL bases");
         if (!Files.exists(backupsRoot)) return;
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(backupsRoot)) {
             for (Path p : ds) deleteTree(p);

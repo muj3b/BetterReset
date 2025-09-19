@@ -71,3 +71,7 @@ seeds:
 
 deletion:
   parallelism: 2
+
+debug:
+  gui: false
+  backups: false
