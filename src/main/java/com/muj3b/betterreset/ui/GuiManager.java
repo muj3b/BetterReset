@@ -138,6 +138,7 @@ public class GuiManager implements Listener {
             case DELETE_ALL_GLOBAL -> handleDeleteAllGlobalClick(p, displayName);
             case SETTINGS -> handleSettingsClick(p, displayName, e.getClick());
             case SETTINGS_SECTION -> handleSettingsSectionClick(p, meta);
+            case SETTING_EDIT -> handleSettingEditorClick(p, meta, displayName);
             case SEED_SELECTOR -> handleSeedSelectorClick(p, displayName);
             case MESSAGES -> handleMessagesClick(p, displayName);
         }
@@ -178,11 +179,17 @@ public class GuiManager implements Listener {
         p.openInventory(inv);
     }
 
-    private void openBackups(Player p) {
-        GuiHolder holder = new GuiHolder(GuiHolder.Type.BACKUPS, TITLE_ARCHIVES);
-        Inventory inv = Bukkit.createInventory(holder, 54, TITLE_ARCHIVES);
+    private void openBackups(Player p) { openBackupsFiltered(p, null); }
+
+    private void openBackupsFiltered(Player p, String filterBase) {
+        Component title = (filterBase == null) ? TITLE_ARCHIVES : Component.empty().append(TITLE_ARCHIVES).append(TextComponents.gray(" | ")).append(Component.text(filterBase));
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.BACKUPS, title);
+        Inventory inv = Bukkit.createInventory(holder, 54, title);
         holder.setInventory(inv);
         List<BackupManager.BackupRef> refs = resetService.listBackups();
+        if (filterBase != null) {
+            refs = refs.stream().filter(r -> r.base().equalsIgnoreCase(filterBase)).toList();
+        }
         LinkedHashSet<String> bases = new LinkedHashSet<>();
         for (var r : refs) bases.add(r.base());
         int hslot = 0;
@@ -198,12 +205,18 @@ public class GuiManager implements Listener {
             long[] arr = baseStats.getOrDefault(b, new long[]{0L,0L});
             // Per-base totals item (distinct icon)
             if (hslot <= 8) {
-                inv.setItem(hslot++, namedComponent(
+                ItemStack info = namedComponent(
                         Material.BARREL,
                         TextComponents.white("Base: " + b),
                         TextComponents.gray("Count: ").append(TextComponents.white(String.valueOf(arr[0]))),
                         TextComponents.gray("Size: ").append(TextComponents.white(human(arr[1])))
-                ));
+                );
+                ItemMeta im = info.getItemMeta();
+                if (im != null) {
+                    im.getPersistentDataContainer().set(new NamespacedKey(plugin, "header_base"), PersistentDataType.STRING, b);
+                    info.setItemMeta(im);
+                }
+                inv.setItem(hslot++, info);
             }
             // Delete ALL for base (keep as separate item)
             if (hslot <= 8) {
@@ -244,6 +257,9 @@ public class GuiManager implements Listener {
         inv.setItem(45, namedComponent(Material.PAPER, TextComponents.white("Archives Info"),
                 TextComponents.gray("Total: ").append(TextComponents.white(String.valueOf(totalCount))),
                 TextComponents.gray("Size: ").append(TextComponents.white(human(totalBytes)))));
+        if (filterBase != null) {
+            inv.setItem(52, namedComponent(Material.BOOK, TextComponents.white("Show All Archives")));
+        }
         inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
@@ -338,7 +354,11 @@ public class GuiManager implements Listener {
         if (displayName.equalsIgnoreCase("Back")) { openMain(p); return; }
         if (displayName.equalsIgnoreCase("Prune Now") || displayName.startsWith("Prune ALL")) { resetService.pruneBackupsAsync(p, Optional.empty(), true); return; }
         if (displayName.equalsIgnoreCase("Delete ALL Archives")) { openDeleteAllGlobalConfirm(p); return; }
+        if (displayName.equalsIgnoreCase("Show All Archives")) { openBackupsFiltered(p, null); return; }
         if (displayName.startsWith("Delete ALL ")) { String base = displayName.substring("Delete ALL ".length()); openDeleteAllConfirm(p, base); return; }
+        // Click on base info item filters list
+        String headerBase = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "header_base"), PersistentDataType.STRING);
+        if (headerBase != null) { openBackupsFiltered(p, headerBase); return; }
         // Prefer persistent metadata for reliability
         String base = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_base"), PersistentDataType.STRING);
         String ts = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_timestamp"), PersistentDataType.STRING);
@@ -576,7 +596,7 @@ public class GuiManager implements Listener {
         p.openInventory(inv);
     }
 
-    private void openSettingsSection(Player p, String section) {
+    public void openSettingsSection(Player p, String section) {
         lastSettingsSection.put(p.getUniqueId(), section);
         Component title = TextComponents.blue("Settings | ").append(Component.text(section));
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS_SECTION, title);
@@ -664,13 +684,111 @@ public class GuiManager implements Listener {
                 Messages.send(p, (!cur ? "&aEnabled &r" : "&cDisabled &r") + path);
                 openSettingsSection(p, section);
             }
-            case "INT", "LONG", "DOUBLE", "STRING" -> {
+            case "INT", "LONG", "DOUBLE" -> {
+                openSettingEditor(p, section, key, type);
+            }
+            case "STRING" -> {
                 awaitingConfigPath.put(p.getUniqueId(), path);
                 awaitingValueType.put(p.getUniqueId(), type);
                 lastSettingsSection.put(p.getUniqueId(), section);
                 Messages.send(p, "&eType new value in chat for &r" + path + " &7(Type: " + type + ")");
                 p.closeInventory();
             }
+        }
+    }
+
+    private void openSettingEditor(Player p, String section, String key, String type) {
+        String path = section + "." + key;
+        Component title = TextComponents.blue("Edit | ").append(Component.text(path));
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTING_EDIT, title);
+        Inventory inv = Bukkit.createInventory(holder, 27, title);
+        holder.setInventory(inv);
+        // Determine current value
+        double curD = 0; long curL = 0; int curI = 0;
+        if ("DOUBLE".equals(type)) curD = plugin.getConfig().getDouble(path);
+        else if ("LONG".equals(type)) curL = plugin.getConfig().getLong(path);
+        else curI = plugin.getConfig().getInt(path);
+        // Build buttons
+        addSettingEditorButton(inv, 10, Material.REDSTONE, "-BIG", section, key, type, "dec_big");
+        addSettingEditorButton(inv, 11, Material.REDSTONE_TORCH, "-SMALL", section, key, type, "dec_small");
+        ItemStack cur = namedComponent(Material.PAPER, TextComponents.white("Current: " + ("DOUBLE".equals(type) ? curD : ("LONG".equals(type) ? curL : curI))));
+        ItemMeta cm = cur.getItemMeta();
+        if (cm != null) {
+            cm.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_section"), PersistentDataType.STRING, section);
+            cm.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_key"), PersistentDataType.STRING, key);
+            cm.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING, type);
+            cur.setItemMeta(cm);
+        }
+        inv.setItem(13, cur);
+        addSettingEditorButton(inv, 15, Material.GLOWSTONE_DUST, "+SMALL", section, key, type, "inc_small");
+        addSettingEditorButton(inv, 16, Material.GLOWSTONE, "+BIG", section, key, type, "inc_big");
+        addSettingEditorButton(inv, 20, Material.NAME_TAG, "Type Value", section, key, type, "type_chat");
+        addSettingEditorButton(inv, 22, Material.ARROW, "Back", section, key, type, "back");
+        p.openInventory(inv);
+    }
+
+    private void addSettingEditorButton(Inventory inv, int slot, Material mat, String label, String section, String key, String type, String op) {
+        ItemStack it = namedComponent(mat, TextComponents.white(label));
+        ItemMeta m = it.getItemMeta();
+        if (m != null) {
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_section"), PersistentDataType.STRING, section);
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_key"), PersistentDataType.STRING, key);
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING, type);
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_op"), PersistentDataType.STRING, op);
+            it.setItemMeta(m);
+        }
+        inv.setItem(slot, it);
+    }
+
+    private void handleSettingEditorClick(Player p, ItemMeta meta, String displayName) {
+        String section = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_section"), PersistentDataType.STRING);
+        String key = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_key"), PersistentDataType.STRING);
+        String type = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING);
+        String op = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_op"), PersistentDataType.STRING);
+        if (section == null || key == null || type == null || op == null) return;
+        String path = section + "." + key;
+        switch (op) {
+            case "back" -> { openSettingsSection(p, section); return; }
+            case "type_chat" -> {
+                awaitingConfigPath.put(p.getUniqueId(), path);
+                awaitingValueType.put(p.getUniqueId(), type);
+                lastSettingsSection.put(p.getUniqueId(), section);
+                Messages.send(p, "&eType new value in chat for &r" + path + " &7(Type: " + type + ")");
+                p.closeInventory();
+                return;
+            }
+        }
+        // numeric ops
+        if ("DOUBLE".equals(type)) {
+            double cur = plugin.getConfig().getDouble(path);
+            double small = 0.1, big = 1.0;
+            if (op.equals("dec_small")) cur -= small;
+            else if (op.equals("dec_big")) cur -= big;
+            else if (op.equals("inc_small")) cur += small;
+            else if (op.equals("inc_big")) cur += big;
+            plugin.getConfig().set(path, cur);
+            plugin.saveConfig();
+            openSettingEditor(p, section, key, type);
+        } else if ("LONG".equals(type)) {
+            long cur = plugin.getConfig().getLong(path);
+            long small = 1, big = 10;
+            if (op.equals("dec_small")) cur -= small;
+            else if (op.equals("dec_big")) cur -= big;
+            else if (op.equals("inc_small")) cur += small;
+            else if (op.equals("inc_big")) cur += big;
+            plugin.getConfig().set(path, cur);
+            plugin.saveConfig();
+            openSettingEditor(p, section, key, type);
+        } else { // INT default
+            int cur = plugin.getConfig().getInt(path);
+            int small = 1, big = 10;
+            if (op.equals("dec_small")) cur -= small;
+            else if (op.equals("dec_big")) cur -= big;
+            else if (op.equals("inc_small")) cur += small;
+            else if (op.equals("inc_big")) cur += big;
+            plugin.getConfig().set(path, cur);
+            plugin.saveConfig();
+            openSettingEditor(p, section, key, type);
         }
     }
 

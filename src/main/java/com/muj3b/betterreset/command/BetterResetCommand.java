@@ -86,6 +86,16 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, "&bhttps://donate.stripe.com/8x29AT0H58K03judnR0Ba01");
                 }
                 return true;
+            case "settings":
+                if (!(sender instanceof Player p)) { Messages.send(sender, "&cPlayer-only command."); return true; }
+                if (!sender.hasPermission("betterreset.gui")) { Messages.send(sender, plugin.getConfig().getString("messages.noPermission")); return true; }
+                if (args.length >= 2) {
+                    String sec = args[1].toLowerCase(Locale.ROOT);
+                    guiManager.openSettingsSection(p, sec);
+                } else {
+                    guiManager.openSettings(p);
+                }
+                return true;
             case "status":
                 if (!sender.hasPermission("betterreset.status")) {
                     Messages.send(sender, plugin.getConfig().getString("messages.noPermission"));
@@ -104,8 +114,12 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            List<String> subs = Arrays.asList("fullreset","gui","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune","deleteallbackups","preload","testreset","seeds");
+            List<String> subs = Arrays.asList("fullreset","gui","settings","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune","deleteallbackups","preload","testreset","seeds");
             return subs.stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
+        }
+        if (args.length >= 2 && args[0].equalsIgnoreCase("settings")) {
+            List<String> secs = Arrays.asList("confirmation","players","limits","countdown","preload","teleport","backups","seeds","deletion","debug","messages");
+            return secs.stream().filter(s -> s.startsWith(args[1].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
         }
         if (args.length >= 2 && args[0].equalsIgnoreCase("fullreset")) {
             String[] shifted = Arrays.copyOfRange(args, 1, args.length);
