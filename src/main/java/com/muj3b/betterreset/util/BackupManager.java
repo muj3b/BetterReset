@@ -70,8 +70,17 @@ for (Path ts : times) {
                             if (!Files.isDirectory(ts)) continue;
                             boolean hasComplete = Files.exists(ts.resolve(".complete"));
                             boolean hasMeta = Files.exists(ts.resolve("meta.properties"));
-                            if (hasComplete && hasMeta) {
-                                out.add(new BackupRef(base.getFileName().toString(), ts.getFileName().toString(), ts));
+if (hasComplete && hasMeta) {
+                                long sizeBytes = -1L;
+                                long playtime = -1L;
+                                // attempt to read metadata
+                                try (java.io.InputStream is = java.nio.file.Files.newInputStream(ts.resolve("meta.properties"))) {
+                                    java.util.Properties meta = new java.util.Properties();
+                                    meta.load(is);
+                                    try { sizeBytes = Long.parseLong(meta.getProperty("sizeBytes", "-1")); } catch (Exception ignored) {}
+                                    try { playtime = Long.parseLong(meta.getProperty("playtimeSeconds", "-1")); } catch (Exception ignored) {}
+                                } catch (Exception ignored) {}
+                                out.add(new BackupRef(base.getFileName().toString(), ts.getFileName().toString(), ts, sizeBytes, playtime));
                             } else {
                                 boolean dbg = false;
                                 try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
@@ -129,7 +138,7 @@ for (Path ts : times) {
         }
     }
 
-    public record BackupRef(String base, String timestamp, Path path) {}
+    public record BackupRef(String base, String timestamp, Path path, long sizeBytes, long playtimeSeconds) {}
 
     private void moveTree(Path src, Path dest) throws IOException {
         try {

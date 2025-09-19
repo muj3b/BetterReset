@@ -33,10 +33,10 @@ public class GuiManager implements Listener {
     private static final Component TITLE_SELECT = TextComponents.darkGreen("Reset | Select World");
     private static final Component TITLE_SETTINGS = TextComponents.blue("Settings");
     private static final Component TITLE_RESET_FOR = TextComponents.darkRed("Reset | ");
-    private static final Component TITLE_BACKUPS = TextComponents.gold("Backups");
-    private static final Component TITLE_BACKUP_OPTIONS = TextComponents.gold("Backup | ");
-    private static final Component TITLE_DELETE_BACKUP = TextComponents.darkRed("Delete Backup | ");
-    private static final Component TITLE_DELETE_ALL_GLOBAL = TextComponents.darkRed("Delete ALL Backups | ALL BASES");
+    private static final Component TITLE_ARCHIVES = TextComponents.gold("Archives");
+    private static final Component TITLE_ARCHIVE_OPTIONS = TextComponents.gold("Archive | ");
+    private static final Component TITLE_DELETE_ARCHIVE = TextComponents.darkRed("Delete Archive | ");
+    private static final Component TITLE_DELETE_ALL_GLOBAL = TextComponents.darkRed("Delete ALL Archives | ALL BASES");
 
     private final FullResetPlugin plugin;
     private final ResetService resetService;
@@ -118,7 +118,7 @@ public class GuiManager implements Listener {
             case MAIN -> {
                 switch (displayName.toLowerCase(Locale.ROOT)) {
                     case "reset worlds" -> openWorldSelect(p);
-                    case "backups" -> openBackups(p);
+                    case "archives" -> openBackups(p);
                     case "settings" -> openSettings(p);
                     default -> {}
                 }
@@ -145,7 +145,7 @@ public class GuiManager implements Listener {
         holder.setInventory(inv);
         inv.setItem(11, namedComponent(Material.GRASS_BLOCK, TextComponents.green("Reset Worlds"), TextComponents.gray("Pick a base world")));
         inv.setItem(13, namedComponent(Material.COMPARATOR, TextComponents.blue("Settings"), TextComponents.gray("Change options")));
-        inv.setItem(15, namedComponent(Material.CHEST, TextComponents.gold("Backups"), TextComponents.gray("Browse & restore")));
+        inv.setItem(15, namedComponent(Material.CHEST, TextComponents.gold("Archives"), TextComponents.gray("Browse & restore")));
         p.openInventory(inv);
     }
 
@@ -175,8 +175,8 @@ public class GuiManager implements Listener {
     }
 
     private void openBackups(Player p) {
-        GuiHolder holder = new GuiHolder(GuiHolder.Type.BACKUPS, TITLE_BACKUPS);
-        Inventory inv = Bukkit.createInventory(holder, 54, TITLE_BACKUPS);
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.BACKUPS, TITLE_ARCHIVES);
+        Inventory inv = Bukkit.createInventory(holder, 54, TITLE_ARCHIVES);
         holder.setInventory(inv);
         List<BackupManager.BackupRef> refs = resetService.listBackups();
         LinkedHashSet<String> bases = new LinkedHashSet<>();
@@ -186,12 +186,16 @@ public class GuiManager implements Listener {
             if (hslot > 8) break;
             inv.setItem(hslot++, namedComponent(Material.LAVA_BUCKET, TextComponents.darkRed("Delete ALL " + b), TextComponents.gray("Click to confirm")));
         }
+        long totalBytes = 0L; int totalCount = refs.size();
         int slot = 9;
         for (var ref : refs) {
             if (slot >= 48) break;
             Component label = Component.empty().append(TextComponents.gold(ref.base())).append(TextComponents.gray(" @ ")).append(TextComponents.yellow(ref.timestamp()));
             List<Component> lore = new ArrayList<>();
             lore.add(TextComponents.gray("Click to restore"));
+            if (ref.sizeBytes() >= 0) lore.add(TextComponents.gray("Size: ").append(TextComponents.white(human(ref.sizeBytes()))));
+            if (ref.playtimeSeconds() >= 0) lore.add(TextComponents.gray("Playtime: ").append(TextComponents.white(formatDuration(ref.playtimeSeconds()))));
+            if (ref.sizeBytes() > 0) totalBytes += ref.sizeBytes();
             ItemStack item = new ItemStack(Material.CHEST);
             ItemMeta im = item.getItemMeta();
             if (im != null) {
@@ -207,13 +211,17 @@ public class GuiManager implements Listener {
         int keep = 2;
         try { keep = Math.max(0, plugin.getConfig().getInt("backups.pruneNowKeepPerBase", 2)); } catch (Exception ignored) {}
         inv.setItem(49, namedComponent(Material.SHEARS, TextComponents.red("Prune ALL (Keep " + keep + ")")));
-        inv.setItem(51, namedComponent(Material.TNT, TextComponents.darkRed("Delete ALL Backups"), TextComponents.gray("All bases")));
+        inv.setItem(51, namedComponent(Material.TNT, TextComponents.darkRed("Delete ALL Archives"), TextComponents.gray("All bases")));
+        // Totals info
+        inv.setItem(45, namedComponent(Material.PAPER, TextComponents.white("Archives Info"),
+                TextComponents.gray("Total: ").append(TextComponents.white(String.valueOf(totalCount))),
+                TextComponents.gray("Size: ").append(TextComponents.white(human(totalBytes)))));
         inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
     private void openBackupOptions(Player p, String base, String ts) {
-        Component title = Component.empty().append(TITLE_BACKUP_OPTIONS).append(Component.text(base)).append(TextComponents.gray(" @ ")).append(Component.text(ts));
+        Component title = Component.empty().append(TITLE_ARCHIVE_OPTIONS).append(Component.text(base)).append(TextComponents.gray(" @ ")).append(Component.text(ts));
         GuiHolder holder = new GuiHolder(GuiHolder.Type.BACKUP_OPTIONS, title);
         Inventory inv = Bukkit.createInventory(holder, 27, title);
         holder.setInventory(inv);
@@ -221,10 +229,12 @@ public class GuiManager implements Listener {
         inv.setItem(12, namedComponent(Material.GRASS_BLOCK, TextComponents.white("Restore Overworld")));
         inv.setItem(14, namedComponent(Material.NETHERRACK, TextComponents.white("Restore Nether")));
         inv.setItem(16, namedComponent(Material.END_STONE, TextComponents.white("Restore End")));
-        inv.setItem(20, namedComponent(Material.TNT, TextComponents.red("Delete Backup")));
+        int keep = 2; try { keep = Math.max(0, plugin.getConfig().getInt("backups.pruneNowKeepPerBase", 2)); } catch (Exception ignored) {}
+        inv.setItem(18, namedComponent(Material.SHEARS, TextComponents.red("Prune Base (Keep " + keep + ")")));
+        inv.setItem(20, namedComponent(Material.TNT, TextComponents.red("Delete Archive")));
         inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         // attach timestamp/base to all actionable items
-        for (int idx : new int[]{10,12,14,16,20}) {
+        for (int idx : new int[]{10,12,14,16,18,20}) {
             ItemStack it = inv.getItem(idx);
             if (it == null) continue;
             ItemMeta m = it.getItemMeta();
@@ -239,7 +249,7 @@ public class GuiManager implements Listener {
     }
 
     private void openDeleteConfirm(Player p, String base, String ts) {
-        Component title = Component.empty().append(TITLE_DELETE_BACKUP).append(Component.text(base)).append(TextComponents.gray(" @ ")).append(Component.text(ts));
+        Component title = Component.empty().append(TITLE_DELETE_ARCHIVE).append(Component.text(base)).append(TextComponents.gray(" @ ")).append(Component.text(ts));
         GuiHolder holder = new GuiHolder(GuiHolder.Type.DELETE_BACKUP, title);
         Inventory inv = Bukkit.createInventory(holder, 27, title);
         holder.setInventory(inv);
@@ -299,7 +309,7 @@ public class GuiManager implements Listener {
     private void handleBackupsClick(Player p, String displayName, ItemMeta meta) {
         if (displayName.equalsIgnoreCase("Back")) { openMain(p); return; }
         if (displayName.equalsIgnoreCase("Prune Now") || displayName.startsWith("Prune ALL")) { resetService.pruneBackupsAsync(p, Optional.empty(), true); return; }
-        if (displayName.equalsIgnoreCase("Delete ALL Backups")) { openDeleteAllGlobalConfirm(p); return; }
+        if (displayName.equalsIgnoreCase("Delete ALL Archives")) { openDeleteAllGlobalConfirm(p); return; }
         if (displayName.startsWith("Delete ALL ")) { String base = displayName.substring("Delete ALL ".length()); openDeleteAllConfirm(p, base); return; }
         // Prefer persistent metadata for reliability
         String base = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "backup_base"), PersistentDataType.STRING);
@@ -322,8 +332,8 @@ public class GuiManager implements Listener {
             case "Restore Overworld" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.OVERWORLD)); }
             case "Restore Nether" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.NETHER)); }
             case "Restore End" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.END)); }
-            case "Delete Backup" -> openDeleteConfirm(p, base, ts);
-            default -> {}
+            case "Delete Archive" -> openDeleteConfirm(p, base, ts);
+            default -> { if (displayName.startsWith("Prune Base")) { resetService.pruneBackupsAsync(p, Optional.of(base), true); openBackups(p); } }
         }
     }
 
@@ -334,7 +344,7 @@ public class GuiManager implements Listener {
         if (sel != null) { base = sel.base(); ts = sel.timestamp(); }
         if (base == null || ts == null) {
             String invTitle = PlainTextComponentSerializer.plainText().serialize(((GuiHolder) p.getOpenInventory().getTopInventory().getHolder()).getTitle());
-            String raw = invTitle.replace(PlainTextComponentSerializer.plainText().serialize(TITLE_DELETE_BACKUP), "");
+            String raw = invTitle.replace(PlainTextComponentSerializer.plainText().serialize(TITLE_DELETE_ARCHIVE), "");
             String[] parts = raw.split(" @ ", 2);
             if (parts.length != 2) { openBackups(p); return; }
             base = parts[0]; ts = parts[1];
@@ -388,6 +398,20 @@ public class GuiManager implements Listener {
         if (displayName.equalsIgnoreCase("Confirm Delete ALL")) { p.closeInventory(); resetService.deleteAllBackupsAsync(p); }
     }
 
+    private String human(long bytes) {
+        String[] u = {"B","KB","MB","GB","TB"};
+        double b = Math.max(0, bytes);
+        int i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+        return String.format(java.util.Locale.US, "%.1f %s", b, u[i]);
+    }
+
+    private String formatDuration(long seconds) {
+        if (seconds < 0) return "-";
+        long h = seconds / 3600; long m = (seconds % 3600) / 60; long s = seconds % 60;
+        if (h > 0) return String.format(java.util.Locale.US, "%dh %02dm %02ds", h, m, s);
+        return String.format(java.util.Locale.US, "%dm %02ds", m, s);
+    }
+
     private void handleMessagesClick(Player p, String displayName) {
         if (displayName.equalsIgnoreCase("Back")) { openSettings(p); return; }
         String path = "messages." + displayName;
@@ -397,8 +421,15 @@ public class GuiManager implements Listener {
 
     private void handleSettingsClick(Player p, String dn, org.bukkit.event.inventory.ClickType click) {
         if (dn.equalsIgnoreCase("Back")) { openMain(p); return; }
-        if (dn.equalsIgnoreCase("Preload Enabled")) { flip(p, "preload.enabled"); return; }
-        // other settings handlers omitted for brevity in this migration
+        switch (dn) {
+            case "Preload Enabled" -> { flip(p, "preload.enabled"); return; }
+            case "Same Seed For All" -> { flip(p, "seeds.useSameSeedForAllDimensions"); return; }
+            case "Broadcast to All" -> { flip(p, "countdown.broadcastToAll"); return; }
+            case "Return to New Spawn" -> { flip(p, "players.returnToNewSpawnAfterReset"); return; }
+            case "Force Respawn To New" -> { flip(p, "players.forceRespawnToNewOverworld"); return; }
+            case "Fresh Start On Reset" -> { flip(p, "players.freshStartOnReset"); return; }
+            default -> { /* ignore */ }
+        }
     }
 
     private void toggleDim(Player p, String base, EnumSet<ResetService.Dimension> dims, ResetService.Dimension d) {
@@ -419,6 +450,18 @@ public class GuiManager implements Listener {
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS, TITLE_SETTINGS);
         Inventory inv = Bukkit.createInventory(holder, 27, TITLE_SETTINGS);
         holder.setInventory(inv);
+        boolean preload = plugin.getConfig().getBoolean("preload.enabled", true);
+        boolean sameSeed = plugin.getConfig().getBoolean("seeds.useSameSeedForAllDimensions", true);
+        boolean broadcastAll = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
+        boolean returnSpawn = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
+        boolean forceRespawn = plugin.getConfig().getBoolean("players.forceRespawnToNewOverworld", true);
+        boolean freshStart = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
+        inv.setItem(10, toggleItem(preload, Material.ICE, "Preload Enabled"));
+        inv.setItem(11, toggleItem(sameSeed, Material.WHEAT_SEEDS, "Same Seed For All"));
+        inv.setItem(12, toggleItem(broadcastAll, Material.NOTE_BLOCK, "Broadcast to All"));
+        inv.setItem(13, toggleItem(returnSpawn, Material.COMPASS, "Return to New Spawn"));
+        inv.setItem(14, toggleItem(forceRespawn, Material.TOTEM_OF_UNDYING, "Force Respawn To New"));
+        inv.setItem(15, toggleItem(freshStart, Material.BREAD, "Fresh Start On Reset"));
         inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
