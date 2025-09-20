@@ -31,13 +31,13 @@ import java.util.stream.Collectors;
 public class GuiManager implements Listener {
 
     private static final Component TITLE_MAIN = TextComponents.darkAqua("BetterReset | Manager");
-    private static final Component TITLE_SELECT = TextComponents.darkGreen("Reset | Select World");
-    private static final Component TITLE_SETTINGS = TextComponents.blue("Settings");
-    private static final Component TITLE_RESET_FOR = TextComponents.darkRed("Reset | ");
-    private static final Component TITLE_ARCHIVES = TextComponents.gold("Archives");
-    private static final Component TITLE_ARCHIVE_OPTIONS = TextComponents.gold("Archive | ");
-    private static final Component TITLE_DELETE_ARCHIVE = TextComponents.darkRed("Delete Archive | ");
-    private static final Component TITLE_DELETE_ALL_GLOBAL = TextComponents.darkRed("Delete ALL Archives | ALL BASES");
+    private static final Component TITLE_SELECT = TextComponents.darkGreen("BetterReset | Select World");
+    private static final Component TITLE_SETTINGS = TextComponents.blue("BetterReset | Settings");
+    private static final Component TITLE_RESET_FOR = TextComponents.darkRed("BetterReset | Reset | ");
+    private static final Component TITLE_ARCHIVES = TextComponents.gold("BetterReset | Archives");
+    private static final Component TITLE_ARCHIVE_OPTIONS = TextComponents.gold("BetterReset | Archive | ");
+    private static final Component TITLE_DELETE_ARCHIVE = TextComponents.darkRed("BetterReset | Delete Archive | ");
+    private static final Component TITLE_DELETE_ALL_GLOBAL = TextComponents.darkRed("BetterReset | Delete ALL Archives | ALL BASES");
 
     private final FullResetPlugin plugin;
     private final ResetService resetService;
@@ -88,13 +88,13 @@ public class GuiManager implements Listener {
         return input;
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onDrag(InventoryDragEvent e) {
         Inventory top = e.getView().getTopInventory();
         if (top != null && top.getHolder() instanceof GuiHolder) e.setCancelled(true);
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player)) return;
         Player p = (Player) e.getWhoClicked();
@@ -303,7 +303,7 @@ public class GuiManager implements Listener {
     }
 
     private void openDeleteAllConfirm(Player p, String base) {
-        Component title = TextComponents.darkRed("Delete ALL | " + base);
+        Component title = TextComponents.darkRed("BetterReset | Delete ALL | " + base);
         GuiHolder holder = new GuiHolder(GuiHolder.Type.DELETE_ALL, title);
         Inventory inv = Bukkit.createInventory(holder, 27, title);
         holder.setInventory(inv);
@@ -322,7 +322,7 @@ public class GuiManager implements Listener {
     }
 
     private void openSeedSelector(Player p, String base, EnumSet<ResetService.Dimension> dims) {
-        GuiHolder holder = new GuiHolder(GuiHolder.Type.SEED_SELECTOR, TextComponents.darkPurple("Select Seed | ").append(Component.text(base)));
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.SEED_SELECTOR, TextComponents.darkPurple("BetterReset | Select Seed | ").append(Component.text(base)));
         Inventory inv = Bukkit.createInventory(holder, 27, holder.getTitle());
         holder.setInventory(inv);
         List<Long> seeds = plugin.getSeedHistory().list();
@@ -577,7 +577,7 @@ public class GuiManager implements Listener {
     }
 
     public void openMessages(Player p) {
-        Component title = TextComponents.blue("Messages");
+        Component title = TextComponents.blue("BetterReset | Messages");
         GuiHolder holder = new GuiHolder(GuiHolder.Type.MESSAGES, title);
         Inventory inv = Bukkit.createInventory(holder, 54, title);
         holder.setInventory(inv);
