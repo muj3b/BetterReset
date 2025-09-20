@@ -50,6 +50,9 @@ public class GuiManager implements Listener {
     private final Map<UUID, EnumSet<ResetService.Dimension>> selectedDims = new HashMap<>();
     // track per-player selected backup (base -> timestamp)
     private final Map<UUID, BackupSelection> selectedBackup = new HashMap<>();
+    // Archives pagination and filter state per-player
+    private final Map<UUID, Integer> archivesPage = new HashMap<>();
+    private final Map<UUID, String> archivesFilter = new HashMap<>();
 
     private static record BackupSelection(String base, String timestamp) {}
 
@@ -160,7 +163,7 @@ public class GuiManager implements Listener {
         Inventory inv = Bukkit.createInventory(holder, 27, TITLE_SELECT);
         holder.setInventory(inv);
         inv.setItem(13, namedComponent(Material.GRASS_BLOCK, TextComponents.green(base), TextComponents.gray("Click to configure")));
-        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back to Archives")));
+        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
@@ -182,6 +185,12 @@ public class GuiManager implements Listener {
     private void openBackups(Player p) { openBackupsFiltered(p, null); }
 
     private void openBackupsFiltered(Player p, String filterBase) {
+        // update filter & reset page if changed
+        UUID id = p.getUniqueId();
+        String prev = archivesFilter.get(id);
+        if (filterBase == null) archivesFilter.remove(id); else archivesFilter.put(id, filterBase);
+        if (!Objects.equals(prev, filterBase)) archivesPage.put(id, 0);
+        int page = Math.max(0, archivesPage.getOrDefault(id, 0));
         Component title = (filterBase == null) ? TITLE_ARCHIVES : Component.empty().append(TITLE_ARCHIVES).append(TextComponents.gray(" | ")).append(Component.text(filterBase));
         GuiHolder holder = new GuiHolder(GuiHolder.Type.BACKUPS, title);
         Inventory inv = Bukkit.createInventory(holder, 54, title);
@@ -228,9 +237,16 @@ public class GuiManager implements Listener {
             }
         }
         long totalBytes = 0L; int totalCount = refs.size();
+        // pagination setup
+        int pageSize = 36; // slots 9..44 inclusive
+        int pageCount = Math.max(1, (int) Math.ceil(totalCount / (double) pageSize));
+        if (page >= pageCount) { page = pageCount - 1; archivesPage.put(id, page); }
+        int start = page * pageSize;
+        int end = Math.min(totalCount, start + pageSize);
         int slot = 9;
-        for (var ref : refs) {
-            if (slot >= 48) break;
+        for (int i = start; i < end; i++) {
+            var ref = refs.get(i);
+            if (slot > 44) break;
             Component label = Component.empty().append(TextComponents.gold(ref.base())).append(TextComponents.gray(" @ ")).append(TextComponents.yellow(ref.timestamp()));
             List<Component> lore = new ArrayList<>();
             lore.add(TextComponents.gray("Click to restore"));
@@ -257,6 +273,12 @@ public class GuiManager implements Listener {
         inv.setItem(45, namedComponent(Material.PAPER, TextComponents.white("Archives Info"),
                 TextComponents.gray("Total: ").append(TextComponents.white(String.valueOf(totalCount))),
                 TextComponents.gray("Size: ").append(TextComponents.white(human(totalBytes)))));
+        // Pagination controls
+        if (pageCount > 1) {
+            inv.setItem(46, namedComponent(Material.ARROW, TextComponents.yellow("Prev Page")));
+            inv.setItem(47, namedComponent(Material.PAPER, TextComponents.white("Page " + (page+1) + "/" + pageCount)));
+            inv.setItem(48, namedComponent(Material.ARROW, TextComponents.yellow("Next Page")));
+        }
         if (filterBase != null) {
             inv.setItem(52, namedComponent(Material.BOOK, TextComponents.white("Show All Archives")));
         }
@@ -355,6 +377,25 @@ public class GuiManager implements Listener {
         if (displayName.equalsIgnoreCase("Prune Now") || displayName.startsWith("Prune ALL")) { resetService.pruneBackupsAsync(p, Optional.empty(), true); return; }
         if (displayName.equalsIgnoreCase("Delete ALL Archives")) { openDeleteAllGlobalConfirm(p); return; }
         if (displayName.equalsIgnoreCase("Show All Archives")) { openBackupsFiltered(p, null); return; }
+        if (displayName.equalsIgnoreCase("Prev Page")) {
+            UUID id = p.getUniqueId();
+            int page = Math.max(0, archivesPage.getOrDefault(id, 0) - 1);
+            archivesPage.put(id, page);
+            openBackupsFiltered(p, archivesFilter.get(id));
+            return;
+        }
+        if (displayName.equalsIgnoreCase("Next Page")) {
+            UUID id = p.getUniqueId();
+            String f = archivesFilter.get(id);
+            List<BackupManager.BackupRef> all = resetService.listBackups();
+            if (f != null) all = all.stream().filter(r -> r.base().equalsIgnoreCase(f)).toList();
+            int pageSize = 36;
+            int pageCount = Math.max(1, (int) Math.ceil(all.size() / (double) pageSize));
+            int page = Math.min(pageCount - 1, archivesPage.getOrDefault(id, 0) + 1);
+            archivesPage.put(id, page);
+            openBackupsFiltered(p, f);
+            return;
+        }
         if (displayName.startsWith("Delete ALL ")) { String base = displayName.substring("Delete ALL ".length()); openDeleteAllConfirm(p, base); return; }
         // Click on base info item filters list
         String headerBase = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "header_base"), PersistentDataType.STRING);
@@ -375,7 +416,7 @@ public class GuiManager implements Listener {
         if (base == null) base = selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName()));
         if (ts == null) ts = "";
         switch (displayName) {
-            case "Back", "Back to Archives" -> openBackups(p);
+            case "Back", "Back to Archives" -> { UUID id = p.getUniqueId(); openBackupsFiltered(p, archivesFilter.get(id)); }
             case "Restore ALL" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts); }
             case "Restore Overworld" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.OVERWORLD)); }
             case "Restore Nether" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.NETHER)); }
@@ -406,7 +447,7 @@ public class GuiManager implements Listener {
 
     private void handleDeleteAllClick(Player p, String displayName) {
         String invTitle = PlainTextComponentSerializer.plainText().serialize(((GuiHolder) p.getOpenInventory().getTopInventory().getHolder()).getTitle());
-        String base = invTitle.replace("Delete ALL | ", "");
+        String base = invTitle.replace("BetterReset | Delete ALL | ", "").replace("Delete ALL | ", "");
         if (displayName.equalsIgnoreCase("Cancel")) openBackups(p);
         else if (displayName.equalsIgnoreCase("Confirm Delete All")) { p.closeInventory(); resetService.deleteAllBackupsForBaseAsync(p, base); }
     }
