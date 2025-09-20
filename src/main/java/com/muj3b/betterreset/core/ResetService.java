@@ -204,10 +204,31 @@ public class ResetService {
             boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
             if (returnPlayers && overworld != null) {
                 Location spawn = overworld.getSpawnLocation();
-                for (UUID id : previouslyAffected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { safeTeleport(p, spawn); applyFreshStartIfEnabled(p); } }
+                for (UUID id : previouslyAffected) {
+                    Player p = Bukkit.getPlayer(id);
+                    if (p != null && p.isOnline()) {
+                        safeTeleport(p, spawn);
+                    }
+                }
             }
 
-            Messages.send(initiator, "&aReset complete for '&e" + base + "&a'.");
+            // Apply fresh-start resets to players as configured
+            if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
+                Set<UUID> alreadyReset = new HashSet<>();
+                for (UUID id : previouslyAffected) {
+                    Player p = Bukkit.getPlayer(id);
+                    if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); alreadyReset.add(id); }
+                }
+                if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
+                    for (Player online : Bukkit.getOnlinePlayers()) {
+                        if (!alreadyReset.contains(online.getUniqueId())) {
+                            applyFreshStartIfEnabled(online);
+                        }
+                    }
+                }
+            }
+
+            Messages.send(initiator, "&aRecreated worlds for '&e" + base + "&a' successfully.");
             for (Player online : Bukkit.getOnlinePlayers()) { if (online.equals(initiator)) continue; if (online.hasPermission("betterreset.notify")) Messages.send(online, "&a[BetterReset]&7 World '&e" + base + "&7' has been reset."); }
 
             totalResets++; lastResetTimestamp.put(base, System.currentTimeMillis()); auditLogger.log(plugin, "Reset completed for '" + base + "'"); resetInProgress = false; phase = "IDLE";

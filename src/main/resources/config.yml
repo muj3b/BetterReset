@@ -13,8 +13,10 @@ players:
   forceRespawnToNewOverworld: true
   # How long after a reset to enforce respawn override (seconds)
   respawnRecentWindowSeconds: 600
-  # Clear inventories, XP, hunger, health when moved into the fresh world
+  # Clear inventories, XP, hunger, health when reset completes
   freshStartOnReset: true
+  # If true, apply freshStart to ALL online players (not just those in affected worlds)
+  resetAllOnlineAfterReset: true
   
 # General limits and safety gates
 limits:
