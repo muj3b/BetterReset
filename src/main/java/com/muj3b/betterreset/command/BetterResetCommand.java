@@ -3,7 +3,7 @@ package com.muj3b.betterreset.command;
 import com.muj3b.betterreset.FullResetPlugin;
 import com.muj3b.betterreset.core.ConfirmationManager;
 import com.muj3b.betterreset.core.ResetService;
-import com.muj3b.betterreset.ui.GuiManager;
+import com.muj3b.betterreset.ui.SimpleGuiManager;
 import com.muj3b.betterreset.util.Messages;
 // removed unused imports
 import org.bukkit.command.Command;
@@ -23,10 +23,10 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
     private final ResetService resetService;
     @SuppressWarnings("unused")
     private final ConfirmationManager confirmationManager;
-    private final GuiManager guiManager;
+    private final SimpleGuiManager guiManager;
     private final FullResetCommand delegate;
 
-    public BetterResetCommand(FullResetPlugin plugin, ResetService resetService, ConfirmationManager confirmationManager, GuiManager guiManager) {
+    public BetterResetCommand(FullResetPlugin plugin, ResetService resetService, ConfirmationManager confirmationManager, SimpleGuiManager guiManager) {
         this.plugin = plugin;
         this.resetService = resetService;
         this.confirmationManager = confirmationManager;
@@ -42,7 +42,7 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, plugin.getConfig().getString("messages.noPermission"));
                     return true;
                 }
-                guiManager.openMain(p);
+                guiManager.openMainMenu(p);
                 return true;
             }
             Messages.send(sender, "&eUsage: /" + label + " <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about>");
@@ -62,7 +62,7 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                     Messages.send(sender, "&cGUI can only be used by a player.");
                     return true;
                 }
-                guiManager.openMain(p);
+                guiManager.openMainMenu(p);
                 return true;
             case "reload":
                 if (!sender.hasPermission("betterreset.reload")) {
@@ -90,10 +90,10 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                 if (!(sender instanceof Player p)) { Messages.send(sender, "&cPlayer-only command."); return true; }
                 if (!sender.hasPermission("betterreset.gui")) { Messages.send(sender, plugin.getConfig().getString("messages.noPermission")); return true; }
                 if (args.length >= 2) {
-                    String sec = args[1].toLowerCase(Locale.ROOT);
-                    guiManager.openSettingsSection(p, sec);
+                    // Simplified UI has no per-section view; open the single settings page
+                    guiManager.openSettingsMenu(p);
                 } else {
-                    guiManager.openSettings(p);
+                    guiManager.openSettingsMenu(p);
                 }
                 return true;
             case "status":

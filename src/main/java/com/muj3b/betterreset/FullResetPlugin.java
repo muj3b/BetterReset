@@ -5,7 +5,7 @@ import com.muj3b.betterreset.command.FullResetCommand;
 import com.muj3b.betterreset.command.LegacyFullResetCommand;
 import com.muj3b.betterreset.core.ConfirmationManager;
 import com.muj3b.betterreset.core.ResetService;
-import com.muj3b.betterreset.ui.GuiManager;
+import com.muj3b.betterreset.ui.SimpleGuiManager;
 import com.muj3b.betterreset.util.CountdownManager;
 import com.muj3b.betterreset.util.MultiverseCompat;
 import com.muj3b.betterreset.util.PlaytimeTracker;
@@ -25,7 +25,7 @@ public final class FullResetPlugin extends JavaPlugin {
 
     private ConfirmationManager confirmationManager;
     private ResetService resetService;
-    private GuiManager guiManager;
+    private SimpleGuiManager guiManager;
     private CountdownManager countdownManager;
     private MultiverseCompat multiverseCompat;
     private RespawnManager respawnManager;
@@ -47,7 +47,7 @@ public final class FullResetPlugin extends JavaPlugin {
         this.seedHistory = new SeedHistory(historySize);
 
         this.resetService = new ResetService(this, confirmationManager, countdownManager, multiverseCompat, preloadManager);
-        this.guiManager = new GuiManager(this, resetService);
+        this.guiManager = new SimpleGuiManager(this, resetService);
         this.respawnManager = new RespawnManager(this);
         this.playtimeTracker = new PlaytimeTracker(this);
 

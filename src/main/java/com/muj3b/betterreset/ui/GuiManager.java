@@ -1,5 +1,18 @@
 package com.muj3b.betterreset.ui;
 
+import org.bukkit.entity.Player;
+
+/**
+ * Deprecated GUI manager kept as a stub to maintain source compatibility.
+ * The simplified GUI is implemented in SimpleGuiManager.
+ */
+public class GuiManager {
+    public void openMain(Player p) {}
+    public void openSettings(Player p) {}
+    public void openSettingsSection(Player p, String section) {}
+}
+*/
+/*
 import com.muj3b.betterreset.FullResetPlugin;
 import com.muj3b.betterreset.core.ResetService;
 import com.muj3b.betterreset.util.BackupManager;
