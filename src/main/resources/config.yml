@@ -49,6 +49,16 @@ teleport:
   # Name of a safe fallback world to send players before deletion. Leave blank to auto-pick/create.
   fallbackWorldName: ""
 
+teleportMode:
+  # If true, GUI actions will use a "Teleport" flow instead of resetting the overworld
+  # It teleports the initiator far away and others even farther, applies fresh-start resets,
+  # and (optionally) resets Nether/End at the same time.
+  enabled: false
+  playerDistance: 15000
+  othersDistance: 50000
+  ensureSafe: true
+  resetNetherEnd: true
+
 
 confirmation:
   # If true, console commands skip confirmation

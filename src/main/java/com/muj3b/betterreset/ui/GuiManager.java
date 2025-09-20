@@ -176,8 +176,18 @@ public class GuiManager implements Listener {
         inv.setItem(10, toggleItem(dims.contains(ResetService.Dimension.OVERWORLD), Material.GRASS_BLOCK, "Overworld"));
         inv.setItem(12, toggleItem(dims.contains(ResetService.Dimension.NETHER), Material.NETHERRACK, "Nether"));
         inv.setItem(14, toggleItem(dims.contains(ResetService.Dimension.END), Material.END_STONE, "The End"));
-        inv.setItem(22, namedComponent(Material.LIME_WOOL, TextComponents.green("Reset Selected (Random Seed)")));
-        inv.setItem(24, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Reset Selected (Custom Seed)")));
+        boolean teleportMode = plugin.getConfig().getBoolean("teleportMode.enabled", false);
+        if (teleportMode) {
+            inv.setItem(22, namedComponent(Material.LIME_WOOL, TextComponents.green("Teleport Selected (Random Seed)"),
+                    TextComponents.gray("Teleport you ~" + plugin.getConfig().getInt("teleportMode.playerDistance",15000) + " blocks"),
+                    TextComponents.gray("Others ~" + plugin.getConfig().getInt("teleportMode.othersDistance",50000) + " blocks"),
+                    TextComponents.gray("Nether/End reset simultaneously (if enabled)")));
+            inv.setItem(24, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Teleport Selected (Custom Seed)"),
+                    TextComponents.gray("Custom seed for Nether/End reset")));
+        } else {
+            inv.setItem(22, namedComponent(Material.LIME_WOOL, TextComponents.green("Reset Selected (Random Seed)")));
+            inv.setItem(24, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Reset Selected (Custom Seed)")));
+        }
         inv.setItem(40, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
@@ -368,6 +378,8 @@ public class GuiManager implements Listener {
             case "Back" -> openWorldSelect(p);
             case "Reset Selected (Random Seed)" -> { p.closeInventory(); resetService.startReset(p, base, dims); }
             case "Reset Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims); }
+            case "Teleport Selected (Random Seed)" -> { p.closeInventory(); resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims); }
+            case "Teleport Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims); }
             default -> {}
         }
     }
@@ -475,7 +487,11 @@ public class GuiManager implements Listener {
                             }
                         }
                         p.closeInventory();
-                        resetService.startResetWithCountdown(p, base, Optional.of(seed), dims);
+                        if (plugin.getConfig().getBoolean("teleportMode.enabled", false)) {
+                            resetService.startTeleportWithCountdown(p, base, Optional.of(seed), dims);
+                        } else {
+                            resetService.startResetWithCountdown(p, base, Optional.of(seed), dims);
+                        }
                     }
                 } catch (NumberFormatException ignored) {}
             }
