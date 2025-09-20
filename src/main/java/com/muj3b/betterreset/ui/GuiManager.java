@@ -186,6 +186,9 @@ public class GuiManager implements Listener {
                     TextComponents.gray("Custom seed for Nether/End reset")));
             inv.setItem(31, namedComponent(Material.ENDER_EYE, TextComponents.white("Teleport Now"),
                     TextComponents.gray("Skip seed selection; use random")));
+            boolean enabled = plugin.getConfig().getBoolean("teleportMode.enabled", false);
+            inv.setItem(32, namedComponent(Material.LEVER, TextComponents.white("Mode: " + (enabled ? "Teleport" : "Reset")),
+                    TextComponents.gray("Click to switch mode")));
         } else {
             inv.setItem(22, namedComponent(Material.LIME_WOOL, TextComponents.green("Reset Selected (Random Seed)")));
             inv.setItem(24, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Reset Selected (Custom Seed)")));
@@ -387,6 +390,8 @@ public class GuiManager implements Listener {
             case "Teleport Selected (Random Seed)" -> { p.closeInventory(); resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims); }
             case "Teleport Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims); }
             case "Teleport Now" -> { p.closeInventory(); resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims); }
+            case "Mode: Teleport" -> { plugin.getConfig().set("teleportMode.enabled", false); plugin.saveConfig(); openResetOptions(p, base); }
+            case "Mode: Reset" -> { plugin.getConfig().set("teleportMode.enabled", true); plugin.saveConfig(); openResetOptions(p, base); }
             default -> {}
         }
     }
@@ -623,6 +628,14 @@ public class GuiManager implements Listener {
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS, TITLE_SETTINGS);
         Inventory inv = Bukkit.createInventory(holder, 54, TITLE_SETTINGS);
         holder.setInventory(inv);
+        // Status banner
+        boolean tm = plugin.getConfig().getBoolean("teleportMode.enabled", false);
+        boolean preload = plugin.getConfig().getBoolean("preload.enabled", true);
+        boolean dbg = plugin.getConfig().getBoolean("debug.gui", false) || plugin.getConfig().getBoolean("debug.backups", false);
+        inv.setItem(4, namedComponent(Material.PAPER, TextComponents.white("Status"),
+                TextComponents.gray("Teleport Mode: ").append(TextComponents.white(tm?"ON":"OFF")),
+                TextComponents.gray("Preload: ").append(TextComponents.white(preload?"ON":"OFF")),
+                TextComponents.gray("Debug: ").append(TextComponents.white(dbg?"ON":"OFF"))));
         // Categories (with explanatory lore)
         inv.setItem(10, namedComponent(Material.BOOK, TextComponents.white("Confirmation"), TextComponents.gray("Confirm prompts & timeouts")));
         inv.setItem(11, namedComponent(Material.ARMOR_STAND, TextComponents.white("Players"), TextComponents.gray("Respawn, fresh-start, return")));
@@ -827,7 +840,8 @@ public class GuiManager implements Listener {
         // numeric ops
         if ("DOUBLE".equals(type)) {
             double cur = plugin.getConfig().getDouble(path);
-            double small = 0.1, big = 1.0;
+            double small = plugin.getConfig().getDouble("editorSteps."+section+"."+key+".small", 0.1);
+            double big = plugin.getConfig().getDouble("editorSteps."+section+"."+key+".big", 1.0);
             if (op.equals("dec_small")) cur -= small;
             else if (op.equals("dec_big")) cur -= big;
             else if (op.equals("inc_small")) cur += small;
@@ -837,7 +851,8 @@ public class GuiManager implements Listener {
             openSettingEditor(p, section, key, type);
         } else if ("LONG".equals(type)) {
             long cur = plugin.getConfig().getLong(path);
-            long small = 1, big = 10;
+            long small = (long) plugin.getConfig().getDouble("editorSteps."+section+"."+key+".small", 1);
+            long big = (long) plugin.getConfig().getDouble("editorSteps."+section+"."+key+".big", 10);
             if (op.equals("dec_small")) cur -= small;
             else if (op.equals("dec_big")) cur -= big;
             else if (op.equals("inc_small")) cur += small;
@@ -847,7 +862,8 @@ public class GuiManager implements Listener {
             openSettingEditor(p, section, key, type);
         } else { // INT default
             int cur = plugin.getConfig().getInt(path);
-            int small = 1, big = 10;
+            int small = (int) plugin.getConfig().getDouble("editorSteps."+section+"."+key+".small", 1);
+            int big = (int) plugin.getConfig().getDouble("editorSteps."+section+"."+key+".big", 10);
             if (op.equals("dec_small")) cur -= small;
             else if (op.equals("dec_big")) cur -= big;
             else if (op.equals("inc_small")) cur += small;

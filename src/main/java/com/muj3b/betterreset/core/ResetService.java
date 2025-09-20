@@ -142,6 +142,10 @@ public class ResetService {
 
                 for (UUID id : affectedPlayers) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, fallback.getSpawnLocation()); }
                 for (Player online : Bukkit.getOnlinePlayers()) if (worldNames.contains(online.getWorld().getName())) safeTeleport(online, fallback.getSpawnLocation());
+                // Apply fresh-start immediately for affected players (pre-unload) to ensure visible reset
+                if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
+                    for (UUID id : affectedPlayers) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) applyFreshStartIfEnabled(p); }
+                }
 
                 Map<String, Path> worldFolders = resolveWorldFolders(worldNames);
                 if (!unloadWorldsReliably(worldNames, fallback, initiator)) { resetInProgress = false; phase = "IDLE"; return; }
@@ -279,6 +283,10 @@ public class ResetService {
             World fallback = findOrCreateFallbackWorld(worldNames); if (fallback == null) { Messages.send(initiator, "&cFailed to create fallback world; aborting restore."); resetInProgress = false; phase = "IDLE"; return; }
             for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, fallback.getSpawnLocation()); }
             for (String name : worldNames) { World w = Bukkit.getWorld(name); if (w != null) { try { w.save(); } catch (Exception ignored) {} Bukkit.unloadWorld(w, true); } }
+            // Apply fresh-start immediately to affected players prior to restore
+            if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
+                for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) applyFreshStartIfEnabled(p); }
+            }
             CompletableFuture.runAsync(() -> {
                 try {
                     backupManager.restore(base, timestamp);
@@ -504,12 +512,22 @@ public class ResetService {
         Location selfTarget = null;
         if (initiator instanceof Player ip && ip.isOnline()) {
             selfTarget = findSafeLocation(overworld, distSelf, r);
-            if (selfTarget != null) { ip.teleport(selfTarget); affected.add(ip.getUniqueId()); if (fresh) applyFreshStartIfEnabled(ip); }
+            if (selfTarget != null) {
+                ip.teleport(selfTarget);
+                affected.add(ip.getUniqueId());
+                if (fresh) applyFreshStartIfEnabled(ip);
+                try { ip.sendTitle("", "Teleported ~" + distSelf + " blocks", 10, 40, 10); } catch (Throwable ignored) {}
+            }
         }
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (initiator instanceof Player ip && p.getUniqueId().equals(ip.getUniqueId())) continue;
             Location t = findSafeLocation(overworld, distOthers, r);
-            if (t != null) { p.teleport(t); affected.add(p.getUniqueId()); if (fresh) applyFreshStartIfEnabled(p); }
+            if (t != null) {
+                p.teleport(t);
+                affected.add(p.getUniqueId());
+                if (fresh) applyFreshStartIfEnabled(p);
+                try { p.sendTitle("", "Teleported ~" + distOthers + " blocks", 10, 40, 10); } catch (Throwable ignored) {}
+            }
         }
         Messages.send(initiator, "&aTeleport-mode complete. Players moved far away in '&e" + baseWorld + "&a'.");
     }
