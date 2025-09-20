@@ -662,7 +662,6 @@ public class GuiManager implements Listener {
     }
 
     private ItemStack buildSettingItem(String section, String key, Object val) {
-        String path = section + "." + key;
         Material icon = Material.PAPER;
         String type = "STRING";
         Component name = TextComponents.white(key);
