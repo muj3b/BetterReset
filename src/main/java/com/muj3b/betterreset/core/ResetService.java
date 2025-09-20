@@ -222,12 +222,13 @@ public class ResetService {
                 Set<UUID> alreadyReset = new HashSet<>();
                 for (UUID id : previouslyAffected) {
                     Player p = Bukkit.getPlayer(id);
-                    if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); alreadyReset.add(id); }
+                    if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); alreadyReset.add(id); try { p.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} }
                 }
                 if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
                     for (Player online : Bukkit.getOnlinePlayers()) {
                         if (!alreadyReset.contains(online.getUniqueId())) {
                             applyFreshStartIfEnabled(online);
+                            try { online.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {}
                         }
                     }
                 }
@@ -301,9 +302,9 @@ public class ResetService {
                         }
                         if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
                             Set<UUID> already = new HashSet<>();
-                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id);} }
+                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id); try { p.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} } }
                             if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
-                                for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) applyFreshStartIfEnabled(op);
+                                for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) { applyFreshStartIfEnabled(op); try { op.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} }
                             }
                         }
                         Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a'."); if (initiator instanceof Player ip) { World w = Bukkit.getWorld(base); if (w != null) safeTeleport(ip, w.getSpawnLocation()); } resetInProgress = false; phase = "IDLE";
@@ -334,9 +335,9 @@ public class ResetService {
                         }
                         if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
                             Set<UUID> already = new HashSet<>();
-                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id);} }
+                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id); try { p.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} } }
                             if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
-                                for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) applyFreshStartIfEnabled(op);
+                                for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) { applyFreshStartIfEnabled(op); try { op.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} }
                             }
                         }
                         Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a' for " + dims + "."); if (initiator instanceof Player ip) { World w = Bukkit.getWorld(base); if (w != null) safeTeleport(ip, w.getSpawnLocation()); } resetInProgress = false; phase = "IDLE";

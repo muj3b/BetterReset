@@ -173,10 +173,13 @@ public class GuiManager implements Listener {
         GuiHolder holder = new GuiHolder(GuiHolder.Type.RESET_OPTIONS, Component.empty().append(TITLE_RESET_FOR).append(Component.text(base)));
         Inventory inv = Bukkit.createInventory(holder, 45, holder.getTitle());
         holder.setInventory(inv);
+        // Mode banner
+        boolean teleportMode = plugin.getConfig().getBoolean("teleportMode.enabled", false);
+        inv.setItem(4, namedComponent(Material.PAPER, TextComponents.white("Mode: " + (teleportMode ? "Teleport" : "Reset")),
+                TextComponents.gray("Use the lever below to switch modes")));
         inv.setItem(10, toggleItem(dims.contains(ResetService.Dimension.OVERWORLD), Material.GRASS_BLOCK, "Overworld"));
         inv.setItem(12, toggleItem(dims.contains(ResetService.Dimension.NETHER), Material.NETHERRACK, "Nether"));
         inv.setItem(14, toggleItem(dims.contains(ResetService.Dimension.END), Material.END_STONE, "The End"));
-        boolean teleportMode = plugin.getConfig().getBoolean("teleportMode.enabled", false);
         if (teleportMode) {
             inv.setItem(22, namedComponent(Material.LIME_WOOL, TextComponents.green("Teleport Selected (Random Seed)"),
                     TextComponents.gray("Teleport you ~" + plugin.getConfig().getInt("teleportMode.playerDistance",15000) + " blocks"),
