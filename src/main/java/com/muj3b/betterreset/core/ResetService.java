@@ -283,6 +283,20 @@ public class ResetService {
                     backupManager.restore(base, timestamp);
                     Bukkit.getScheduler().runTask(plugin, () -> {
                         for (String name : worldNames) { File f = new File(Bukkit.getWorldContainer(), name); if (f.exists()) { World.Environment env = name.endsWith("_nether") ? World.Environment.NETHER : name.endsWith("_the_end") ? World.Environment.THE_END : World.Environment.NORMAL; new WorldCreator(name).environment(env).type(WorldType.NORMAL).createWorld(); } }
+                        // Optionally return affected players and fresh-start
+                        boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
+                        World baseWorld = Bukkit.getWorld(base);
+                        if (returnPlayers && baseWorld != null) {
+                            Location spawn = baseWorld.getSpawnLocation();
+                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, spawn); }
+                        }
+                        if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
+                            Set<UUID> already = new HashSet<>();
+                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id);} }
+                            if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
+                                for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) applyFreshStartIfEnabled(op);
+                            }
+                        }
                         Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a'."); if (initiator instanceof Player ip) { World w = Bukkit.getWorld(base); if (w != null) safeTeleport(ip, w.getSpawnLocation()); } resetInProgress = false; phase = "IDLE";
                     });
                 } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> { Messages.send(initiator, "&cRestore failed: " + ex.getMessage()); resetInProgress = false; phase = "IDLE"; }); }
@@ -302,6 +316,20 @@ public class ResetService {
                     backupManager.restore(base, timestamp, dims);
                     Bukkit.getScheduler().runTask(plugin, () -> {
                         for (String name : worldNames) { File f = new File(Bukkit.getWorldContainer(), name); if (f.exists()) { World.Environment env = name.endsWith("_nether") ? World.Environment.NETHER : name.endsWith("_the_end") ? World.Environment.THE_END : World.Environment.NORMAL; new WorldCreator(name).environment(env).type(WorldType.NORMAL).createWorld(); } }
+                        // Optionally return affected players and fresh-start
+                        boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
+                        World baseWorld = Bukkit.getWorld(base);
+                        if (returnPlayers && baseWorld != null) {
+                            Location spawn = baseWorld.getSpawnLocation();
+                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, spawn); }
+                        }
+                        if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
+                            Set<UUID> already = new HashSet<>();
+                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id);} }
+                            if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
+                                for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) applyFreshStartIfEnabled(op);
+                            }
+                        }
                         Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a' for " + dims + "."); if (initiator instanceof Player ip) { World w = Bukkit.getWorld(base); if (w != null) safeTeleport(ip, w.getSpawnLocation()); } resetInProgress = false; phase = "IDLE";
                     });
                 } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> { Messages.send(initiator, "&cRestore failed: " + ex.getMessage()); resetInProgress = false; phase = "IDLE"; }); }
