@@ -140,7 +140,7 @@ public class GuiManager implements Listener {
             case DELETE_ALL -> handleDeleteAllClick(p, displayName);
             case DELETE_ALL_GLOBAL -> handleDeleteAllGlobalClick(p, displayName);
             case SETTINGS -> handleSettingsClick(p, displayName, e.getClick());
-            case SETTINGS_SECTION -> handleSettingsSectionClick(p, meta);
+            case SETTINGS_SECTION -> handleSettingsSectionClick(p, meta, displayName);
             case SETTING_EDIT -> handleSettingEditorClick(p, meta, displayName);
             case SEED_SELECTOR -> handleSeedSelectorClick(p, displayName);
             case MESSAGES -> handleMessagesClick(p, displayName);
@@ -184,6 +184,8 @@ public class GuiManager implements Listener {
                     TextComponents.gray("Nether/End reset simultaneously (if enabled)")));
             inv.setItem(24, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Teleport Selected (Custom Seed)"),
                     TextComponents.gray("Custom seed for Nether/End reset")));
+            inv.setItem(31, namedComponent(Material.ENDER_EYE, TextComponents.white("Teleport Now"),
+                    TextComponents.gray("Skip seed selection; use random")));
         } else {
             inv.setItem(22, namedComponent(Material.LIME_WOOL, TextComponents.green("Reset Selected (Random Seed)")));
             inv.setItem(24, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Reset Selected (Custom Seed)")));
@@ -376,10 +378,15 @@ public class GuiManager implements Listener {
             case "Nether" -> toggleDim(p, base, dims, ResetService.Dimension.NETHER);
             case "The End" -> toggleDim(p, base, dims, ResetService.Dimension.END);
             case "Back" -> openWorldSelect(p);
-            case "Reset Selected (Random Seed)" -> { p.closeInventory(); resetService.startReset(p, base, dims); }
+            case "Reset Selected (Random Seed)" -> {
+                p.closeInventory();
+                if (plugin.getConfig().getBoolean("teleportMode.enabled", false)) resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims);
+                else resetService.startReset(p, base, dims);
+            }
             case "Reset Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims); }
             case "Teleport Selected (Random Seed)" -> { p.closeInventory(); resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims); }
             case "Teleport Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims); }
+            case "Teleport Now" -> { p.closeInventory(); resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims); }
             default -> {}
         }
     }
@@ -616,18 +623,18 @@ public class GuiManager implements Listener {
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS, TITLE_SETTINGS);
         Inventory inv = Bukkit.createInventory(holder, 54, TITLE_SETTINGS);
         holder.setInventory(inv);
-        // Categories
-        inv.setItem(10, namedComponent(Material.BOOK, TextComponents.white("Confirmation")));
-        inv.setItem(11, namedComponent(Material.ARMOR_STAND, TextComponents.white("Players")));
-        inv.setItem(12, namedComponent(Material.COMPARATOR, TextComponents.white("Limits")));
-        inv.setItem(13, namedComponent(Material.CLOCK, TextComponents.white("Countdown")));
-        inv.setItem(14, namedComponent(Material.ICE, TextComponents.white("Preload")));
-        inv.setItem(15, namedComponent(Material.ENDER_PEARL, TextComponents.white("Teleport")));
-        inv.setItem(19, namedComponent(Material.CHEST, TextComponents.white("Backups")));
-        inv.setItem(20, namedComponent(Material.WHEAT_SEEDS, TextComponents.white("Seeds")));
-        inv.setItem(21, namedComponent(Material.IRON_PICKAXE, TextComponents.white("Deletion")));
-        inv.setItem(22, namedComponent(Material.REDSTONE, TextComponents.white("Debug")));
-        inv.setItem(23, namedComponent(Material.ENDER_EYE, TextComponents.white("Teleport Mode")));
+        // Categories (with explanatory lore)
+        inv.setItem(10, namedComponent(Material.BOOK, TextComponents.white("Confirmation"), TextComponents.gray("Confirm prompts & timeouts")));
+        inv.setItem(11, namedComponent(Material.ARMOR_STAND, TextComponents.white("Players"), TextComponents.gray("Respawn, fresh-start, return")));
+        inv.setItem(12, namedComponent(Material.COMPARATOR, TextComponents.white("Limits"), TextComponents.gray("Online limits, cooldowns")));
+        inv.setItem(13, namedComponent(Material.CLOCK, TextComponents.white("Countdown"), TextComponents.gray("Seconds & broadcast scope")));
+        inv.setItem(14, namedComponent(Material.ICE, TextComponents.white("Preload"), TextComponents.gray("Prepare temp worlds in advance")));
+        inv.setItem(15, namedComponent(Material.ENDER_PEARL, TextComponents.white("Teleport"), TextComponents.gray("Fallback world & safety")));
+        inv.setItem(19, namedComponent(Material.CHEST, TextComponents.white("Backups"), TextComponents.gray("Prune rules & caps")));
+        inv.setItem(20, namedComponent(Material.WHEAT_SEEDS, TextComponents.white("Seeds"), TextComponents.gray("Same-seed or random")));
+        inv.setItem(21, namedComponent(Material.IRON_PICKAXE, TextComponents.white("Deletion"), TextComponents.gray("Threading & cleanup")));
+        inv.setItem(22, namedComponent(Material.REDSTONE, TextComponents.white("Debug"), TextComponents.gray("GUI/backup debug logs")));
+        inv.setItem(23, namedComponent(Material.ENDER_EYE, TextComponents.white("Teleport Mode"), TextComponents.gray("Soft-reset: teleport + reset NE")));
         if (p.hasPermission("betterreset.messages")) {
             inv.setItem(16, namedComponent(Material.PAPER, TextComponents.white("Messages"), TextComponents.gray("Edit configurable text")));
         }
@@ -658,8 +665,8 @@ public class GuiManager implements Listener {
     public void openSettingsSection(Player p, String section) {
         lastSettingsSection.put(p.getUniqueId(), section);
         Component title = TextComponents.blue("Settings | ").append(Component.text(section));
-        GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS_SECTION, title);
-        Inventory inv = Bukkit.createInventory(holder, 54, title);
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS_SECTION, TextComponents.blue("BetterReset | Settings | ").append(Component.text(section)));
+        Inventory inv = Bukkit.createInventory(holder, 54, holder.getTitle());
         holder.setInventory(inv);
         ConfigurationSection cs = plugin.getConfig().getConfigurationSection(section);
         int slot = 10;
@@ -675,7 +682,6 @@ public class GuiManager implements Listener {
             inv.setItem(13, namedComponent(Material.BARRIER, TextComponents.red("No such section: "+section)));
         }
         inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back to Categories")));
-        inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
         p.openInventory(inv);
     }
 
@@ -728,7 +734,9 @@ public class GuiManager implements Listener {
         return it;
     }
 
-    private void handleSettingsSectionClick(Player p, ItemMeta meta) {
+    private void handleSettingsSectionClick(Player p, ItemMeta meta, String displayName) {
+        // Back navigation buttons
+        if ("Back to Categories".equalsIgnoreCase(displayName) || "Back".equalsIgnoreCase(displayName)) { openSettings(p); return; }
         String section = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_section"), PersistentDataType.STRING);
         String key = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_key"), PersistentDataType.STRING);
         String type = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING);
