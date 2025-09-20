@@ -537,6 +537,7 @@ public class GuiManager implements Listener {
             case "Seeds" -> { openSettingsSection(p, "seeds"); return; }
             case "Deletion" -> { openSettingsSection(p, "deletion"); return; }
             case "Debug" -> { openSettingsSection(p, "debug"); return; }
+            case "Teleport Mode" -> { openSettingsSection(p, "teleportMode"); return; }
             case "Messages" -> {
                 if (p.hasPermission("betterreset.messages")) { openMessages(p); }
                 else { Messages.send(p, plugin.getConfig().getString("messages.noPermission","&cYou don't have permission.")); }
@@ -626,6 +627,7 @@ public class GuiManager implements Listener {
         inv.setItem(20, namedComponent(Material.WHEAT_SEEDS, TextComponents.white("Seeds")));
         inv.setItem(21, namedComponent(Material.IRON_PICKAXE, TextComponents.white("Deletion")));
         inv.setItem(22, namedComponent(Material.REDSTONE, TextComponents.white("Debug")));
+        inv.setItem(23, namedComponent(Material.ENDER_EYE, TextComponents.white("Teleport Mode")));
         if (p.hasPermission("betterreset.messages")) {
             inv.setItem(16, namedComponent(Material.PAPER, TextComponents.white("Messages"), TextComponents.gray("Edit configurable text")));
         }
