@@ -262,13 +262,16 @@ public class GuiManager implements Listener {
         // Teleport mode specific settings
         if (teleportMode) {
             int pd = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
-            int od = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
+            boolean setWorldSpawn = plugin.getConfig().getBoolean("teleportMode.setWorldSpawn", true);
+            boolean ensureSafe = plugin.getConfig().getBoolean("teleportMode.ensureSafe", true);
             inv.setItem(30, namedComponent(Material.COMPASS, TextComponents.white("Player Distance: " + pd),
                     TextComponents.gray("Click to cycle")));
-            inv.setItem(32, namedComponent(Material.LODESTONE, TextComponents.white("Others Distance: " + od),
-                    TextComponents.gray("Click to cycle")));
+            inv.setItem(32, namedComponent(setWorldSpawn ? Material.BEACON : Material.BARRIER, TextComponents.white("Set World Spawn"),
+                    TextComponents.gray(setWorldSpawn ? "ON - World spawn updated" : "OFF - Keep old spawn")));
             inv.setItem(34, namedComponent(resetNetherEnd ? Material.NETHERRACK : Material.BARRIER, TextComponents.white("Reset Nether & End"),
                     TextComponents.gray(resetNetherEnd ? "ON - Nether/End reset too" : "OFF - Only teleport players")));
+            inv.setItem(36, namedComponent(ensureSafe ? Material.SHIELD : Material.BARRIER, TextComponents.white("Ensure Safe Location"),
+                    TextComponents.gray(ensureSafe ? "ON - Find safe surface" : "OFF - Basic teleport")));
         }
 
         // Admin-only Advanced Settings
@@ -364,6 +367,20 @@ public class GuiManager implements Listener {
             openSimpleSettings(p);
             return;
         }
+        if (displayName.equals("Set World Spawn")) {
+            boolean cur = plugin.getConfig().getBoolean("teleportMode.setWorldSpawn", true);
+            plugin.getConfig().set("teleportMode.setWorldSpawn", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.equals("Ensure Safe Location")) {
+            boolean cur = plugin.getConfig().getBoolean("teleportMode.ensureSafe", true);
+            plugin.getConfig().set("teleportMode.ensureSafe", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
         if (displayName.startsWith("Player Distance:")) {
             int cur = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
             int[] steps = new int[]{5000,10000,15000,20000,50000};
@@ -372,14 +389,6 @@ public class GuiManager implements Listener {
             plugin.saveConfig();
             openSimpleSettings(p);
             return;
-        }
-        if (displayName.startsWith("Others Distance:")) {
-            int cur = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
-            int[] steps = new int[]{10000,20000,50000,75000,100000};
-            int nextIndex = 0; for (int i=0;i<steps.length;i++){ if (steps[i]==cur){ nextIndex=(i+1)%steps.length; break; } }
-            plugin.getConfig().set("teleportMode.othersDistance", steps[nextIndex]);
-            plugin.saveConfig();
-            openSimpleSettings(p);
         }
     }
 

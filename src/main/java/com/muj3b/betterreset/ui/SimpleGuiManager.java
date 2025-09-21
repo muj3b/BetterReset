@@ -462,6 +462,10 @@ public class SimpleGuiManager implements Listener {
         boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
         boolean broadcastCountdown = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
         boolean resetNetherEnd = plugin.getConfig().getBoolean("teleportMode.resetNetherEnd", true);
+        boolean setWorldSpawn = plugin.getConfig().getBoolean("teleportMode.setWorldSpawn", true);
+        boolean ensureSafe = plugin.getConfig().getBoolean("teleportMode.ensureSafe", true);
+        boolean resetAllOnline = plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true);
+        boolean forceRespawn = plugin.getConfig().getBoolean("players.forceRespawnToNewOverworld", true);
         
         // Row 1: Core settings
         inv.setItem(10, createItem(
@@ -525,30 +529,52 @@ public class SimpleGuiManager implements Listener {
             "Pre-generate worlds for faster resets"
         ));
         
+        // Row 2.5: Additional player settings
+        inv.setItem(28, createItem(
+            resetAllOnline ? Material.PLAYER_HEAD : Material.SKELETON_SKULL,
+            "Reset All Online Players",
+            "Click to toggle",
+            "Currently: " + (resetAllOnline ? "Fresh start for all" : "Only affected players")
+        ));
+        
+        inv.setItem(30, createItem(
+            forceRespawn ? Material.RESPAWN_ANCHOR : Material.BARRIER,
+            "Force Respawn Override",
+            "Click to toggle",
+            "Currently: " + (forceRespawn ? "ON" : "OFF"),
+            "Forces respawn at new spawn after reset"
+        ));
+        
         // Row 3: Teleport mode specific settings
         if (teleportMode) {
             int playerDist = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
-            int othersDist = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
-            
-            inv.setItem(28, createItem(
-                Material.COMPASS,
-                "Your Distance: " + playerDist,
-                "Click to cycle",
-                "How far you teleport"
-            ));
-            
-            inv.setItem(30, createItem(
-                Material.LODESTONE,
-                "Others Distance: " + othersDist,
-                "Click to cycle", 
-                "How far others teleport"
-            ));
             
             inv.setItem(32, createItem(
+                Material.COMPASS,
+                "Teleport Distance: " + playerDist,
+                "Click to cycle",
+                "How far all players teleport (same location)"
+            ));
+            
+            inv.setItem(34, createItem(
                 resetNetherEnd ? Material.NETHERRACK : Material.BARRIER,
                 "Reset Nether & End",
                 "Click to toggle",
                 "Currently: " + (resetNetherEnd ? "ON - Nether/End reset too" : "OFF - Only teleport players")
+            ));
+            
+            inv.setItem(36, createItem(
+                setWorldSpawn ? Material.BEACON : Material.BARRIER,
+                "Set World Spawn",
+                "Click to toggle",
+                "Currently: " + (setWorldSpawn ? "ON - Update world spawn" : "OFF - Keep old spawn")
+            ));
+            
+            inv.setItem(38, createItem(
+                ensureSafe ? Material.SHIELD : Material.BARRIER,
+                "Ensure Safe Location",
+                "Click to toggle",
+                "Currently: " + (ensureSafe ? "ON - Find safe surface" : "OFF - Basic teleport")
             ));
         }
         
@@ -628,7 +654,31 @@ public class SimpleGuiManager implements Listener {
             plugin.saveConfig();
             openSettingsMenu(p);
         }
-        else if (itemName.startsWith("Your Distance:")) {
+        else if (itemName.equals("Reset All Online Players")) {
+            boolean current = plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true);
+            plugin.getConfig().set("players.resetAllOnlineAfterReset", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        }
+        else if (itemName.equals("Force Respawn Override")) {
+            boolean current = plugin.getConfig().getBoolean("players.forceRespawnToNewOverworld", true);
+            plugin.getConfig().set("players.forceRespawnToNewOverworld", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        }
+        else if (itemName.equals("Set World Spawn")) {
+            boolean current = plugin.getConfig().getBoolean("teleportMode.setWorldSpawn", true);
+            plugin.getConfig().set("teleportMode.setWorldSpawn", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        }
+        else if (itemName.equals("Ensure Safe Location")) {
+            boolean current = plugin.getConfig().getBoolean("teleportMode.ensureSafe", true);
+            plugin.getConfig().set("teleportMode.ensureSafe", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        }
+        else if (itemName.startsWith("Teleport Distance:")) {
             // Cycle through distance options
             int current = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
             int next = switch(current) {
@@ -639,20 +689,6 @@ public class SimpleGuiManager implements Listener {
                 default -> 5000;
             };
             plugin.getConfig().set("teleportMode.playerDistance", next);
-            plugin.saveConfig();
-            openSettingsMenu(p);
-        }
-        else if (itemName.startsWith("Others Distance:")) {
-            // Cycle through distance options
-            int current = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
-            int next = switch(current) {
-                case 10000 -> 20000;
-                case 20000 -> 50000;
-                case 50000 -> 75000;
-                case 75000 -> 100000;
-                default -> 10000;
-            };
-            plugin.getConfig().set("teleportMode.othersDistance", next);
             plugin.saveConfig();
             openSettingsMenu(p);
         }

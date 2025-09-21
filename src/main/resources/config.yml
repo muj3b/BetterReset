@@ -5,6 +5,8 @@ confirmation:
   requireConfirm: true
   # How long the confirmation is valid (seconds)
   timeoutSeconds: 15
+  # If true, console commands skip confirmation
+  consoleBypasses: true
 
 players:
   # After reset and recreation, return affected players to the new overworld spawn
@@ -51,21 +53,17 @@ teleport:
 
 teleportMode:
   # If true, GUI actions will use a "Teleport" flow instead of resetting the overworld
-  # It teleports the initiator far away and others even farther, applies fresh-start resets,
+  # It teleports ALL players to the same safe surface location far away and applies fresh-start resets,
   # and (optionally) resets Nether/End at the same time.
   enabled: false
+  # Distance in blocks from spawn to teleport all players (everyone goes to same location)
   playerDistance: 15000
-  othersDistance: 50000
   ensureSafe: true
   resetNetherEnd: true
-  # If true, set the world spawn location to where the initiator teleported
+  # If true, set the world spawn location to where players teleported
   # This ensures players respawn at the new location instead of the old spawn
   setWorldSpawn: true
 
-
-confirmation:
-  # If true, console commands skip confirmation
-  consoleBypasses: true
 
 backups:
   # Enable creating backups before reset. Disable to save storage (folders are deleted instead).

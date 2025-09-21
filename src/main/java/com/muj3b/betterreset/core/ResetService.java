@@ -571,52 +571,35 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
     private void doTeleportMode(CommandSender initiator, String baseWorld) {
         World overworld = Bukkit.getWorld(baseWorld);
         if (overworld == null) { Messages.send(initiator, "&cBase world not found: &e" + baseWorld); return; }
-        int distSelf = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
-        int distOthers = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
+        
+        // Use same distance for everyone (15000 blocks by default)
+        int teleportDistance = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
         boolean fresh = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
         boolean setWorldSpawn = plugin.getConfig().getBoolean("teleportMode.setWorldSpawn", true);
         
-        // Choose random angles
+        // Find ONE safe location that everyone will teleport to
         java.util.Random r = new java.util.Random();
+        Location sharedTeleportLocation = findSafeSurfaceLocation(overworld, teleportDistance, r);
+        
+        if (sharedTeleportLocation == null) {
+            Messages.send(initiator, "&cFailed to find a safe teleport location!");
+            return;
+        }
+        
         Set<UUID> affected = new HashSet<>();
-        Location newSpawnLocation = null;
         
-        if (initiator instanceof Player ip && ip.isOnline()) {
-            Location selfTarget = findSafeLocation(overworld, distSelf, r);
-            if (selfTarget != null) {
-                ip.teleport(selfTarget);
-                affected.add(ip.getUniqueId());
-                if (fresh) applyFreshStartIfEnabled(ip);
-                
-                // Set the new spawn location to where the initiator teleported
-                if (setWorldSpawn) {
-                    newSpawnLocation = selfTarget.clone();
-                }
-                
-try { showShortTitle(ip, "Teleported ~" + distSelf + " blocks"); ip.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
-            }
-        }
-        
-        // If no initiator location was set, find a new spawn location
-        if (setWorldSpawn && newSpawnLocation == null) {
-            newSpawnLocation = findSafeLocation(overworld, distSelf, r);
-        }
-        
+        // Teleport ALL online players to the same location
         for (Player p : Bukkit.getOnlinePlayers()) {
-            if (initiator instanceof Player ip && p.getUniqueId().equals(ip.getUniqueId())) continue;
-            Location t = findSafeLocation(overworld, distOthers, r);
-            if (t != null) {
-                p.teleport(t);
-                affected.add(p.getUniqueId());
-                if (fresh) applyFreshStartIfEnabled(p);
-try { showShortTitle(p, "Teleported ~" + distOthers + " blocks"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
-            }
+            p.teleport(sharedTeleportLocation);
+            affected.add(p.getUniqueId());
+            if (fresh) applyFreshStartIfEnabled(p);
+try { showShortTitle(p, "Teleported to new location"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
         }
         
-        // Set world spawn to the new location
-        if (setWorldSpawn && newSpawnLocation != null) {
+        // Set world spawn to the new shared location
+        if (setWorldSpawn) {
             try {
-                overworld.setSpawnLocation(newSpawnLocation);
+                overworld.setSpawnLocation(sharedTeleportLocation);
                 // Update player spawn beds to prevent respawning at old beds
                 for (UUID playerId : affected) {
                     Player p = Bukkit.getPlayer(playerId);
@@ -626,22 +609,23 @@ try { showShortTitle(p, "Teleported ~" + distOthers + " blocks"); p.sendActionBa
                     }
                 }
                 Messages.send(initiator, "&aWorld spawn set to new location: &e" + 
-                    (int)newSpawnLocation.getX() + ", " + 
-                    (int)newSpawnLocation.getY() + ", " + 
-                    (int)newSpawnLocation.getZ());
+                    (int)sharedTeleportLocation.getX() + ", " + 
+                    (int)sharedTeleportLocation.getY() + ", " + 
+                    (int)sharedTeleportLocation.getZ());
             } catch (Exception ex) {
                 plugin.getLogger().warning("Failed to set world spawn: " + ex.getMessage());
                 Messages.send(initiator, "&cWarning: Failed to set world spawn location.");
             }
         }
         
-        Messages.send(initiator, "&aTeleport-mode complete. Players moved far away in '&e" + baseWorld + "&a'.");
+        Messages.send(initiator, "&aTeleport-mode complete. All players moved to the same location &e" + teleportDistance + " blocks away in '&6" + baseWorld + "&a'.");
     }
 
-    private Location findSafeLocation(World world, int radius, java.util.Random rng) {
+    private Location findSafeSurfaceLocation(World world, int radius, java.util.Random rng) {
         if (world == null) return null;
         Location center = world.getSpawnLocation();
         int attempts = 64;
+        
         for (int i = 0; i < attempts; i++) {
             double angle = rng.nextDouble() * Math.PI * 2;
             int x = center.getBlockX() + (int) Math.round(Math.cos(angle) * radius);
@@ -651,61 +635,77 @@ try { showShortTitle(p, "Teleported ~" + distOthers + " blocks"); p.sendActionBa
                 // Check if chunk is loaded, if not try to load it synchronously for safety
                 org.bukkit.Chunk chunk = world.getChunkAt(x >> 4, z >> 4);
                 if (!chunk.isLoaded()) {
-                    // Try to load chunk safely
                     boolean loaded = chunk.load(false);
                     if (!loaded) {
                         continue; // Skip this location if chunk can't be loaded
                     }
                 }
                 
-                // Safer way to get highest block Y without causing crashes
-                int y = findSafeY(world, x, z);
-                if (y == -1) continue; // Skip if we can't find a safe Y
+                // Find the highest solid block at this X,Z coordinate (surface level)
+                int y = findSurfaceY(world, x, z);
+                if (y == -1) continue; // Skip if we can't find a safe surface Y
                 
                 Location loc = new Location(world, x + 0.5, y + 1.0, z + 0.5);
                 
-                org.bukkit.block.Block feet = world.getBlockAt(x, y, z);
-                org.bukkit.block.Block head = world.getBlockAt(x, y + 1, z);
-                org.bukkit.block.Block ground = world.getBlockAt(x, y - 1, z);
+                // Verify this is actually a safe surface location
+                org.bukkit.block.Block ground = world.getBlockAt(x, y, z);
+                org.bukkit.block.Block feet = world.getBlockAt(x, y + 1, z);
+                org.bukkit.block.Block head = world.getBlockAt(x, y + 2, z);
                 
-                if (feet.isEmpty() && head.isEmpty()) {
-                    Material gm = ground.getType();
-                    if (!gm.isAir() && gm != Material.LAVA && gm != Material.WATER) {
-                        return loc;
-                    }
+                if (ground.getType().isSolid() && 
+                    feet.getType().isAir() && 
+                    head.getType().isAir() &&
+                    ground.getType() != Material.LAVA &&
+                    ground.getType() != Material.WATER) {
+                    return loc;
                 }
             } catch (Throwable ignored) {
                 // Continue to next attempt if anything goes wrong
             }
         }
-        // fallback to spawn if no good spot found
-        return center;
+        
+        // Fallback: return spawn location but elevated to surface
+        Location spawn = center.clone();
+        try {
+            int surfaceY = findSurfaceY(world, spawn.getBlockX(), spawn.getBlockZ());
+            if (surfaceY != -1) {
+                spawn.setY(surfaceY + 1.0);
+            }
+        } catch (Exception ignored) {}
+        return spawn;
     }
     
-    private int findSafeY(World world, int x, int z) {
+    private int findSurfaceY(World world, int x, int z) {
         try {
-            // Use a safer approach to find the highest block
-            int maxY = world.getMaxHeight() - 1;
-            int minY = Math.max(world.getMinHeight() + 1, -60);
+            // Start from a high altitude and work down to find the first solid block (surface)
+            int maxY = Math.min(world.getMaxHeight() - 1, 320);
+            int minY = Math.max(world.getMinHeight() + 1, 0);
             
-            // Start from a reasonable height and work our way down to find solid ground
-            for (int y = Math.min(maxY, 320); y >= minY; y--) {
+            for (int y = maxY; y >= minY; y--) {
                 org.bukkit.block.Block block = world.getBlockAt(x, y, z);
-                if (!block.getType().isAir() && block.getType().isSolid()) {
-                    // Found solid ground, check if there's space above
+                Material type = block.getType();
+                
+                // Found a solid block that's suitable for standing on
+                if (type.isSolid() && 
+                    type != Material.LAVA && 
+                    type != Material.WATER &&
+                    type != Material.BEDROCK) {
+                    
+                    // Make sure there's air space above for player to stand
                     org.bukkit.block.Block above1 = world.getBlockAt(x, y + 1, z);
                     org.bukkit.block.Block above2 = world.getBlockAt(x, y + 2, z);
+                    
                     if (above1.getType().isAir() && above2.getType().isAir()) {
-                        return y + 1; // Return the Y position where player's feet would be
+                        return y; // Return the Y position of the solid block
                     }
                 }
             }
             
-            // If no solid ground found, try the world's spawn location Y
-            return world.getSpawnLocation().getBlockY();
+            // If no suitable surface found, return a reasonable default
+            return Math.max(world.getSeaLevel() + 1, 65);
         } catch (Throwable e) {
-            // Return a reasonable default if everything fails
-            return Math.max(world.getMinHeight() + 10, 70);
+            // Return a safe default if everything fails
+            return Math.max(world.getSeaLevel() + 1, 65);
         }
     }
 }
