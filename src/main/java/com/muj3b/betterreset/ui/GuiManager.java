@@ -158,7 +158,7 @@ public class GuiManager implements Listener {
             case RESET -> {} // Handled by SimpleGuiManager
             case ARCHIVES -> {} // Handled by SimpleGuiManager
             case ARCHIVE_OPTIONS -> {} // Handled by SimpleGuiManager
-            case CONFIG_BROWSER -> {} // Not implemented yet
+            // Removed duplicate CONFIG_BROWSER case
         }
     }
 
