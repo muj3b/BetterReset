@@ -72,6 +72,10 @@ public class GuiManager implements Listener {
                 for (Component c : lore) lc.add(c == null ? Component.empty() : c);
                 meta.lore(lc);
             }
+            // Tag as BetterReset UI so click handler accepts it
+            try {
+                meta.getPersistentDataContainer().set(new NamespacedKey("betterreset","ui"), org.bukkit.persistence.PersistentDataType.BYTE, (byte)1);
+            } catch (Throwable ignored) {}
             it.setItemMeta(meta);
         }
         return it;
@@ -147,6 +151,7 @@ public class GuiManager implements Listener {
             case SETTINGS -> handleSettingsClick(p, displayName, e.getClick());
             case SETTINGS_SECTION -> handleSettingsSectionClick(p, meta, displayName);
             case SETTING_EDIT -> handleSettingEditorClick(p, meta, displayName);
+            case CONFIG_BROWSER -> handleConfigBrowserClick(p, meta, displayName);
             case SEED_SELECTOR -> handleSeedSelectorClick(p, displayName);
             case MESSAGES -> handleMessagesClick(p, displayName);
             // Missing case labels for legacy SimpleGuiManager compatibility
@@ -694,6 +699,123 @@ public class GuiManager implements Listener {
         if (displayName.equalsIgnoreCase("Confirm Delete ALL")) { p.closeInventory(); resetService.deleteAllBackupsAsync(p); }
     }
 
+    // ===== Config Browser (recursive) =====
+    public void openConfigBrowser(Player p, String path) {
+        boolean root = (path == null || path.isEmpty());
+        Component title = root ? TextComponents.blue("BetterReset | All Settings") : TextComponents.blue("BetterReset | Settings | ").append(Component.text(path));
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.CONFIG_BROWSER, title);
+        Inventory inv = Bukkit.createInventory(holder, 54, title);
+        holder.setInventory(inv);
+
+        org.bukkit.configuration.ConfigurationSection sec = root ? plugin.getConfig() : plugin.getConfig().getConfigurationSection(path);
+        int slot = 10;
+        if (sec != null) {
+            for (String key : new java.util.TreeSet<>(sec.getKeys(false))) {
+                if (slot >= 44) break;
+                String full = root ? key : (path + "." + key);
+                Object val = plugin.getConfig().get(full);
+                if (val instanceof org.bukkit.configuration.ConfigurationSection) {
+                    ItemStack it = namedComponent(Material.BOOK, TextComponents.white(key + "/"), TextComponents.gray("Open section"));
+                    ItemMeta m = it.getItemMeta();
+                    if (m != null) {
+                        m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_path"), PersistentDataType.STRING, full);
+                        m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING, "SECTION");
+                        it.setItemMeta(m);
+                    }
+                    inv.setItem(slot++, it);
+                } else {
+                    ItemStack it = buildSettingItemForPath(full, val);
+                    inv.setItem(slot++, it);
+                }
+            }
+        } else {
+            inv.setItem(13, namedComponent(Material.BARRIER, TextComponents.red("No such section")));
+        }
+        inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
+        p.openInventory(inv);
+    }
+
+    private ItemStack buildSettingItemForPath(String fullPath, Object val) {
+        String key = fullPath.substring(fullPath.lastIndexOf('.')+1);
+        Material icon = Material.PAPER;
+        String type = "STRING";
+        Component name = TextComponents.white(key);
+        List<Component> lore = new ArrayList<>();
+        if (val instanceof Boolean b) {
+            icon = b ? Material.LIME_DYE : Material.RED_DYE;
+            type = "BOOLEAN";
+            lore.add(TextComponents.gray("Type: Boolean"));
+            lore.add(TextComponents.gray("Click to toggle"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(b))));
+        } else if (val instanceof Integer i) {
+            icon = Material.COMPARATOR;
+            type = "INT";
+            lore.add(TextComponents.gray("Type: Integer"));
+            lore.add(TextComponents.gray("Click to set via chat"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(i))));
+        } else if (val instanceof Long l) {
+            icon = Material.COMPARATOR;
+            type = "LONG";
+            lore.add(TextComponents.gray("Type: Long"));
+            lore.add(TextComponents.gray("Click to set via chat"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(l))));
+        } else if (val instanceof Double d) {
+            icon = Material.CLOCK;
+            type = "DOUBLE";
+            lore.add(TextComponents.gray("Type: Double"));
+            lore.add(TextComponents.gray("Click to set via chat"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(d))));
+        } else {
+            icon = Material.PAPER;
+            type = "STRING";
+            lore.add(TextComponents.gray("Type: String"));
+            lore.add(TextComponents.gray("Click to set via chat"));
+            lore.add(TextComponents.gray("Current: ").append(TextComponents.white(String.valueOf(val))));
+        }
+        ItemStack it = new ItemStack(icon);
+        ItemMeta m = it.getItemMeta();
+        if (m != null) {
+            m.displayName(name);
+            m.lore(lore);
+            // Tag UI and store path/type
+            try { m.getPersistentDataContainer().set(new NamespacedKey("betterreset","ui"), PersistentDataType.BYTE, (byte)1); } catch (Throwable ignored) {}
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_path"), PersistentDataType.STRING, fullPath);
+            m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING, type);
+            it.setItemMeta(m);
+        }
+        return it;
+    }
+
+    private void handleConfigBrowserClick(Player p, ItemMeta meta, String displayName) {
+        if (displayName.equalsIgnoreCase("Back") || displayName.equalsIgnoreCase("Back to BetterReset")) { Bukkit.getScheduler().runTask(plugin, () -> openSettings(p)); return; }
+        String path = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_path"), PersistentDataType.STRING);
+        String type = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING);
+        if (path == null) return;
+        if ("SECTION".equals(type) || displayName.endsWith("/")) {
+            Bukkit.getScheduler().runTask(plugin, () -> openConfigBrowser(p, path));
+            return;
+        }
+        // setting value
+        switch (type == null ? "STRING" : type) {
+            case "BOOLEAN" -> {
+                boolean cur = plugin.getConfig().getBoolean(path, false);
+                plugin.getConfig().set(path, !cur);
+                plugin.saveConfig();
+                Messages.send(p, (!cur ? "&aEnabled &r" : "&cDisabled &r") + path);
+                String parent = path.contains(".") ? path.substring(0, path.lastIndexOf('.')) : "";
+                String reopen = parent;
+                Bukkit.getScheduler().runTask(plugin, () -> openConfigBrowser(p, reopen));
+            }
+            case "INT", "LONG", "DOUBLE", "STRING" -> {
+                awaitingConfigPath.put(p.getUniqueId(), path);
+                awaitingValueType.put(p.getUniqueId(), type);
+                lastSettingsSection.put(p.getUniqueId(), path.contains(".") ? path.substring(0, path.indexOf('.')) : path);
+                Messages.send(p, "&eType new value in chat for &r" + path + " &7(Type: " + type + ")");
+                p.closeInventory();
+            }
+        }
+    }
+
     private String human(long bytes) {
         String[] u = {"B","KB","MB","GB","TB"};
         double b = Math.max(0, bytes);
@@ -731,6 +853,11 @@ public class GuiManager implements Listener {
             case "Teleport Mode" -> { openSettingsSection(p, "teleportMode"); return; }
             case "Messages" -> {
                 if (p.hasPermission("betterreset.messages")) { openMessages(p); }
+                else { Messages.send(p, plugin.getConfig().getString("messages.noPermission","&cYou don't have permission.")); }
+                return;
+            }
+            case "All Settings (Browser)" -> {
+                if (p.hasPermission("betterreset.admin")) { openConfigBrowser(p, ""); }
                 else { Messages.send(p, plugin.getConfig().getString("messages.noPermission","&cYou don't have permission.")); }
                 return;
             }
@@ -829,6 +956,9 @@ public class GuiManager implements Listener {
         inv.setItem(23, namedComponent(Material.ENDER_EYE, TextComponents.white("Teleport Mode"), TextComponents.gray("Soft-reset: teleport + reset NE")));
         if (p.hasPermission("betterreset.messages")) {
             inv.setItem(16, namedComponent(Material.PAPER, TextComponents.white("Messages"), TextComponents.gray("Edit configurable text")));
+        }
+        if (p.hasPermission("betterreset.admin")) {
+            inv.setItem(25, namedComponent(Material.MAP, TextComponents.white("All Settings (Browser)"), TextComponents.gray("Explore entire config")));
         }
         inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
         p.openInventory(inv);
