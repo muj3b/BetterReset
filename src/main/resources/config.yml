@@ -58,6 +58,9 @@ teleportMode:
   othersDistance: 50000
   ensureSafe: true
   resetNetherEnd: true
+  # If true, set the world spawn location to where the initiator teleported
+  # This ensures players respawn at the new location instead of the old spawn
+  setWorldSpawn: true
 
 
 confirmation:

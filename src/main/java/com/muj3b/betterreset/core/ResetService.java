@@ -209,10 +209,23 @@ public class ResetService {
             boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
             if (returnPlayers && overworld != null) {
                 Location spawn = overworld.getSpawnLocation();
+                // Set world spawn to ensure respawning works correctly
+                try {
+                    overworld.setSpawnLocation(spawn);
+                } catch (Exception ex) {
+                    plugin.getLogger().warning("Failed to set world spawn after reset: " + ex.getMessage());
+                }
+                
                 for (UUID id : previouslyAffected) {
                     Player p = Bukkit.getPlayer(id);
                     if (p != null && p.isOnline()) {
                         safeTeleport(p, spawn);
+                        // Clear bed spawn location so they use world spawn
+                        try {
+                            p.setRespawnLocation(null);
+                        } catch (Exception ex) {
+                            plugin.getLogger().warning("Failed to clear bed spawn for player " + p.getName() + ": " + ex.getMessage());
+                        }
                     }
                 }
             }
@@ -406,11 +419,45 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
     private void applyFreshStartIfEnabled(Player p) {
         if (!plugin.getConfig().getBoolean("players.freshStartOnReset", true)) return;
         try {
-            p.getInventory().clear(); p.getEnderChest().clear(); p.setFireTicks(0);
+            // Clear inventory and ender chest
+            p.getInventory().clear();
+            p.getEnderChest().clear();
+            
+            // Reset health and status effects
+            p.setFireTicks(0);
             var attr = p.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH);
             double maxHealth = (attr != null) ? attr.getValue() : 20.0;
-            p.setHealth(Math.min(maxHealth, 20.0)); p.setFoodLevel(20); p.setSaturation(5f); p.setExhaustion(0f); p.setLevel(0); p.setExp(0f); p.setTotalExperience(0); p.setFallDistance(0f); p.setRemainingAir(p.getMaximumAir());
-        } catch (Exception ignored) {}
+            p.setHealth(Math.min(maxHealth, 20.0));
+            
+            // Reset hunger and saturation
+            p.setFoodLevel(20);
+            p.setSaturation(5f);
+            p.setExhaustion(0f);
+            
+            // Reset XP more thoroughly
+            try {
+                p.setLevel(0);
+                p.setExp(0f);
+                p.setTotalExperience(0);
+            } catch (Exception xpEx) {
+                // Log XP reset failure for debugging
+                plugin.getLogger().warning("Failed to reset XP for player " + p.getName() + ": " + xpEx.getMessage());
+            }
+            
+            // Reset other player state
+            p.setFallDistance(0f);
+            p.setRemainingAir(p.getMaximumAir());
+            
+            // Clear potion effects
+            try {
+                p.getActivePotionEffects().forEach(effect -> p.removePotionEffect(effect.getType()));
+            } catch (Exception effectEx) {
+                plugin.getLogger().warning("Failed to clear potion effects for player " + p.getName() + ": " + effectEx.getMessage());
+            }
+            
+        } catch (Exception ignored) {
+            plugin.getLogger().warning("Failed to apply fresh start for player " + p.getName());
+        }
     }
 
     private void deletePath(Path path) throws IOException {
@@ -486,7 +533,15 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
     // --- Teleport Mode (soft reset of overworld) ---
     public void startTeleportWithCountdown(Player player, String baseWorld, Optional<Long> seedOpt, EnumSet<Dimension> dimensions) {
         if (resetInProgress) { Messages.send(player, "&cA reset is already in progress. Please wait."); return; }
+        
+        // Ensure nether and end are included by default for teleport mode
         EnumSet<Dimension> dims = EnumSet.copyOf(dimensions);
+        boolean resetNetherEnd = plugin.getConfig().getBoolean("teleportMode.resetNetherEnd", true);
+        if (resetNetherEnd) {
+            dims.add(Dimension.NETHER);
+            dims.add(Dimension.END);
+        }
+        
         // We'll teleport in overworld and optionally reset Nether/End
         List<World> affectedWorlds = dims.stream().flatMap(dim -> getAffectedWorld(baseWorld, dim).stream()).toList();
         Optional<Long> effectiveSeed = seedOpt.isPresent() ? seedOpt : Optional.of(rng.nextLong());
@@ -498,14 +553,14 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
             if (!task.isCancelled()) {
                 // Do the teleport + fresh start immediately on main thread
                 Bukkit.getScheduler().runTask(plugin, () -> doTeleportMode(task.getInitiator(), baseWorld));
-                // Optionally reset Nether/End concurrently
-                boolean resetNE = plugin.getConfig().getBoolean("teleportMode.resetNetherEnd", true);
+                // Reset Nether/End if configured to do so
                 EnumSet<Dimension> ne = EnumSet.noneOf(Dimension.class);
-                if (resetNE) {
+                if (resetNetherEnd) {
                     if (dims.contains(Dimension.NETHER)) ne.add(Dimension.NETHER);
                     if (dims.contains(Dimension.END)) ne.add(Dimension.END);
                 }
                 if (!ne.isEmpty()) {
+                    Messages.send(task.getInitiator(), "&7Also resetting nether and end dimensions...");
                     resetWorldAsync(task.getInitiator(), baseWorld, effectiveSeed, ne);
                 }
                 lastResetAt.put(baseWorld, System.currentTimeMillis());
@@ -519,19 +574,34 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
         int distSelf = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
         int distOthers = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
         boolean fresh = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
+        boolean setWorldSpawn = plugin.getConfig().getBoolean("teleportMode.setWorldSpawn", true);
+        
         // Choose random angles
         java.util.Random r = new java.util.Random();
         Set<UUID> affected = new HashSet<>();
-        Location selfTarget = null;
+        Location newSpawnLocation = null;
+        
         if (initiator instanceof Player ip && ip.isOnline()) {
-            selfTarget = findSafeLocation(overworld, distSelf, r);
+            Location selfTarget = findSafeLocation(overworld, distSelf, r);
             if (selfTarget != null) {
                 ip.teleport(selfTarget);
                 affected.add(ip.getUniqueId());
                 if (fresh) applyFreshStartIfEnabled(ip);
+                
+                // Set the new spawn location to where the initiator teleported
+                if (setWorldSpawn) {
+                    newSpawnLocation = selfTarget.clone();
+                }
+                
 try { showShortTitle(ip, "Teleported ~" + distSelf + " blocks"); ip.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
             }
         }
+        
+        // If no initiator location was set, find a new spawn location
+        if (setWorldSpawn && newSpawnLocation == null) {
+            newSpawnLocation = findSafeLocation(overworld, distSelf, r);
+        }
+        
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (initiator instanceof Player ip && p.getUniqueId().equals(ip.getUniqueId())) continue;
             Location t = findSafeLocation(overworld, distOthers, r);
@@ -542,6 +612,29 @@ try { showShortTitle(ip, "Teleported ~" + distSelf + " blocks"); ip.sendActionBa
 try { showShortTitle(p, "Teleported ~" + distOthers + " blocks"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
             }
         }
+        
+        // Set world spawn to the new location
+        if (setWorldSpawn && newSpawnLocation != null) {
+            try {
+                overworld.setSpawnLocation(newSpawnLocation);
+                // Update player spawn beds to prevent respawning at old beds
+                for (UUID playerId : affected) {
+                    Player p = Bukkit.getPlayer(playerId);
+                    if (p != null && p.isOnline()) {
+                        // Clear bed spawn location so they use world spawn
+                        p.setRespawnLocation(null);
+                    }
+                }
+                Messages.send(initiator, "&aWorld spawn set to new location: &e" + 
+                    (int)newSpawnLocation.getX() + ", " + 
+                    (int)newSpawnLocation.getY() + ", " + 
+                    (int)newSpawnLocation.getZ());
+            } catch (Exception ex) {
+                plugin.getLogger().warning("Failed to set world spawn: " + ex.getMessage());
+                Messages.send(initiator, "&cWarning: Failed to set world spawn location.");
+            }
+        }
+        
         Messages.send(initiator, "&aTeleport-mode complete. Players moved far away in '&e" + baseWorld + "&a'.");
     }
 
