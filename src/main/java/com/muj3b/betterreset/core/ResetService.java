@@ -222,13 +222,13 @@ public class ResetService {
                 Set<UUID> alreadyReset = new HashSet<>();
                 for (UUID id : previouslyAffected) {
                     Player p = Bukkit.getPlayer(id);
-                    if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); alreadyReset.add(id); try { p.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} }
+if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); alreadyReset.add(id); try { showShortTitle(p, "Fresh start applied"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} }
                 }
                 if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
                     for (Player online : Bukkit.getOnlinePlayers()) {
                         if (!alreadyReset.contains(online.getUniqueId())) {
                             applyFreshStartIfEnabled(online);
-                            try { online.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {}
+try { showShortTitle(online, "Fresh start applied"); online.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
                         }
                     }
                 }
@@ -302,9 +302,9 @@ public class ResetService {
                         }
                         if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
                             Set<UUID> already = new HashSet<>();
-                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id); try { p.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} } }
+for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id); try { showShortTitle(p, "Fresh start applied"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} } }
                             if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
-                                for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) { applyFreshStartIfEnabled(op); try { op.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} }
+for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) { applyFreshStartIfEnabled(op); try { showShortTitle(op, "Fresh start applied"); op.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} }
                             }
                         }
                         Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a'."); if (initiator instanceof Player ip) { World w = Bukkit.getWorld(base); if (w != null) safeTeleport(ip, w.getSpawnLocation()); } resetInProgress = false; phase = "IDLE";
@@ -335,9 +335,9 @@ public class ResetService {
                         }
                         if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
                             Set<UUID> already = new HashSet<>();
-                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id); try { p.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} } }
+for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id); try { showShortTitle(p, "Fresh start applied"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} } }
                             if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
-                                for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) { applyFreshStartIfEnabled(op); try { op.sendTitle("", "Fresh start applied", 10, 40, 10); } catch (Throwable ignored) {} }
+for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) { applyFreshStartIfEnabled(op); try { showShortTitle(op, "Fresh start applied"); op.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} }
                             }
                         }
                         Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a' for " + dims + "."); if (initiator instanceof Player ip) { World w = Bukkit.getWorld(base); if (w != null) safeTeleport(ip, w.getSpawnLocation()); } resetInProgress = false; phase = "IDLE";
@@ -390,6 +390,18 @@ public class ResetService {
     }
 
     private void safeTeleport(Player p, Location to) { try { p.teleport(to); } catch (Exception ignored) {} }
+
+    private void showShortTitle(Player p, String message) {
+        try {
+            net.kyori.adventure.title.Title.Times times = net.kyori.adventure.title.Title.Times.times(java.time.Duration.ofMillis(300), java.time.Duration.ofMillis(1500), java.time.Duration.ofMillis(300));
+            net.kyori.adventure.title.Title title = net.kyori.adventure.title.Title.title(
+                net.kyori.adventure.text.Component.empty(),
+                net.kyori.adventure.text.Component.text(message),
+                times
+            );
+            p.showTitle(title);
+        } catch (Throwable ignored) {}
+    }
 
     private void applyFreshStartIfEnabled(Player p) {
         if (!plugin.getConfig().getBoolean("players.freshStartOnReset", true)) return;
@@ -517,7 +529,7 @@ public class ResetService {
                 ip.teleport(selfTarget);
                 affected.add(ip.getUniqueId());
                 if (fresh) applyFreshStartIfEnabled(ip);
-                try { ip.sendTitle("", "Teleported ~" + distSelf + " blocks", 10, 40, 10); } catch (Throwable ignored) {}
+try { showShortTitle(ip, "Teleported ~" + distSelf + " blocks"); ip.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
             }
         }
         for (Player p : Bukkit.getOnlinePlayers()) {
@@ -527,7 +539,7 @@ public class ResetService {
                 p.teleport(t);
                 affected.add(p.getUniqueId());
                 if (fresh) applyFreshStartIfEnabled(p);
-                try { p.sendTitle("", "Teleported ~" + distOthers + " blocks", 10, 40, 10); } catch (Throwable ignored) {}
+try { showShortTitle(p, "Teleported ~" + distOthers + " blocks"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
             }
         }
         Messages.send(initiator, "&aTeleport-mode complete. Players moved far away in '&e" + baseWorld + "&a'.");
@@ -541,22 +553,67 @@ public class ResetService {
             double angle = rng.nextDouble() * Math.PI * 2;
             int x = center.getBlockX() + (int) Math.round(Math.cos(angle) * radius);
             int z = center.getBlockZ() + (int) Math.round(Math.sin(angle) * radius);
-            int y = Math.max(world.getMinHeight()+1, world.getHighestBlockYAt(x, z));
-            Location loc = new Location(world, x + 0.5, y + 1.0, z + 0.5);
+            
             try {
+                // Check if chunk is loaded, if not try to load it synchronously for safety
+                org.bukkit.Chunk chunk = world.getChunkAt(x >> 4, z >> 4);
+                if (!chunk.isLoaded()) {
+                    // Try to load chunk safely
+                    boolean loaded = chunk.load(false);
+                    if (!loaded) {
+                        continue; // Skip this location if chunk can't be loaded
+                    }
+                }
+                
+                // Safer way to get highest block Y without causing crashes
+                int y = findSafeY(world, x, z);
+                if (y == -1) continue; // Skip if we can't find a safe Y
+                
+                Location loc = new Location(world, x + 0.5, y + 1.0, z + 0.5);
+                
                 org.bukkit.block.Block feet = world.getBlockAt(x, y, z);
                 org.bukkit.block.Block head = world.getBlockAt(x, y + 1, z);
                 org.bukkit.block.Block ground = world.getBlockAt(x, y - 1, z);
+                
                 if (feet.isEmpty() && head.isEmpty()) {
                     Material gm = ground.getType();
                     if (!gm.isAir() && gm != Material.LAVA && gm != Material.WATER) {
                         return loc;
                     }
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+                // Continue to next attempt if anything goes wrong
+            }
         }
         // fallback to spawn if no good spot found
         return center;
+    }
+    
+    private int findSafeY(World world, int x, int z) {
+        try {
+            // Use a safer approach to find the highest block
+            int maxY = world.getMaxHeight() - 1;
+            int minY = Math.max(world.getMinHeight() + 1, -60);
+            
+            // Start from a reasonable height and work our way down to find solid ground
+            for (int y = Math.min(maxY, 320); y >= minY; y--) {
+                org.bukkit.block.Block block = world.getBlockAt(x, y, z);
+                if (!block.getType().isAir() && block.getType().isSolid()) {
+                    // Found solid ground, check if there's space above
+                    org.bukkit.block.Block above1 = world.getBlockAt(x, y + 1, z);
+                    org.bukkit.block.Block above2 = world.getBlockAt(x, y + 2, z);
+                    if (above1.getType().isAir() && above2.getType().isAir()) {
+                        return y + 1; // Return the Y position where player's feet would be
+                    }
+                }
+            }
+            
+            // If no solid ground found, try the world's spawn location Y
+            return world.getSpawnLocation().getBlockY();
+        } catch (Throwable e) {
+            // Return a reasonable default if everything fails
+            return Math.max(world.getMinHeight() + 10, 70);
+        }
     }
 }
 

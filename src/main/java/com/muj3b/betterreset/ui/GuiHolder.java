@@ -7,13 +7,29 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class GuiHolder implements InventoryHolder {
-    // Simplified GUI types - fewer menus, clearer purpose
+    // GUI types (union of legacy and new for compatibility)
     public enum Type {
-        MAIN,           // Main menu with 3 options
-        RESET,          // Reset/Teleport options for current world
-        ARCHIVES,       // Browse and restore archives
-        ARCHIVE_OPTIONS,// Options for a specific archive
-        SETTINGS        // All settings on one page
+        // Legacy/simple types used by SimpleGuiManager
+        MAIN,
+        RESET,
+        ARCHIVES,
+        ARCHIVE_OPTIONS,
+        SETTINGS,
+
+        // Full manager types
+        SELECT,
+        RESET_OPTIONS,
+        SEED_SELECTOR,
+        BACKUPS,
+        BACKUP_OPTIONS,
+        DELETE_BACKUP,
+        DELETE_ALL,
+        DELETE_ALL_GLOBAL,
+        SIMPLE_SETTINGS,
+        SETTINGS_SECTION,
+        SETTING_EDIT,
+        CONFIG_BROWSER,
+        MESSAGES
     }
 
     private final Type type;

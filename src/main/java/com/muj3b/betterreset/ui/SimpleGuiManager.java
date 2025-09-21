@@ -110,6 +110,20 @@ public class SimpleGuiManager implements Listener {
             case ARCHIVES -> handleArchivesClick(p, itemName, clicked.getItemMeta());
             case ARCHIVE_OPTIONS -> handleArchiveOptionsClick(p, itemName, clicked.getItemMeta());
             case SETTINGS -> handleSettingsClick(p, itemName);
+            // Missing case labels for GuiManager compatibility
+            case SELECT -> {} // Handled by GuiManager
+            case RESET_OPTIONS -> {} // Handled by GuiManager
+            case SEED_SELECTOR -> {} // Handled by GuiManager
+            case BACKUPS -> {} // Handled by GuiManager
+            case BACKUP_OPTIONS -> {} // Handled by GuiManager
+            case DELETE_BACKUP -> {} // Handled by GuiManager
+            case DELETE_ALL -> {} // Handled by GuiManager
+            case DELETE_ALL_GLOBAL -> {} // Handled by GuiManager
+            case SIMPLE_SETTINGS -> {} // Handled by GuiManager
+            case SETTINGS_SECTION -> {} // Handled by GuiManager
+            case SETTING_EDIT -> {} // Handled by GuiManager
+            case CONFIG_BROWSER -> {} // Not implemented yet
+            case MESSAGES -> {} // Handled by GuiManager
         }
     }
     
@@ -124,9 +138,7 @@ public class SimpleGuiManager implements Listener {
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent e) {
         // Clean up any temporary data when GUI closes
-        if (e.getPlayer() instanceof Player p) {
-            // Could clean up temporary maps here if needed
-        }
+        // Currently no cleanup needed for SimpleGuiManager
     }
     
     // ============= MAIN MENU =============
@@ -177,7 +189,7 @@ public class SimpleGuiManager implements Listener {
         String base = baseName(p.getWorld().getName());
         EnumSet<ResetService.Dimension> dims = selectedDims.computeIfAbsent(
             p.getUniqueId(), 
-            k -> EnumSet.of(ResetService.Dimension.OVERWORLD)
+            k -> EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END)
         );
         
         boolean teleportMode = plugin.getConfig().getBoolean("teleportMode.enabled", false);
@@ -236,7 +248,7 @@ public class SimpleGuiManager implements Listener {
         String base = baseName(p.getWorld().getName());
         EnumSet<ResetService.Dimension> dims = selectedDims.get(id);
         if (dims == null || dims.isEmpty()) {
-            dims = EnumSet.of(ResetService.Dimension.OVERWORLD);
+            dims = EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END);
         }
         
         switch (itemName) {
@@ -438,16 +450,20 @@ public class SimpleGuiManager implements Listener {
     public void openSettingsMenu(Player p) {
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS,
             TextComponents.blue("Settings"));
-        Inventory inv = Bukkit.createInventory(holder, 36, holder.getTitle());
+        Inventory inv = Bukkit.createInventory(holder, 45, holder.getTitle()); // Increased size for more options
         holder.setInventory(inv);
         
-        // Most important settings only - simple toggles
+        // Fixed config paths to match actual config.yml
         boolean teleportMode = plugin.getConfig().getBoolean("teleportMode.enabled", false);
-        boolean confirmation = plugin.getConfig().getBoolean("confirmation.require", true);
-        boolean freshStart = plugin.getConfig().getBoolean("players.freshStart", true);
-        boolean preload = plugin.getConfig().getBoolean("preload.enabled", false);
-        boolean countdown = plugin.getConfig().getBoolean("countdown.enabled", true);
+        boolean confirmation = plugin.getConfig().getBoolean("confirmation.requireConfirm", true);
+        boolean freshStart = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
+        boolean preload = plugin.getConfig().getBoolean("preload.enabled", true);
+        boolean backups = plugin.getConfig().getBoolean("backups.enabled", true);
+        boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
+        boolean broadcastCountdown = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
+        boolean resetNetherEnd = plugin.getConfig().getBoolean("teleportMode.resetNetherEnd", true);
         
+        // Row 1: Core settings
         inv.setItem(10, createItem(
             teleportMode ? Material.ENDER_PEARL : Material.GRASS_BLOCK,
             "Mode: " + (teleportMode ? "Teleport" : "Reset"),
@@ -455,66 +471,88 @@ public class SimpleGuiManager implements Listener {
             "Currently: " + (teleportMode ? "Players teleport far away" : "World fully resets")
         ));
         
-        inv.setItem(11, createItem(
+        inv.setItem(12, createItem(
             confirmation ? Material.LIME_DYE : Material.RED_DYE,
             "Require Confirmation",
             "Click to toggle",
             "Currently: " + (confirmation ? "ON" : "OFF")
         ));
         
-        inv.setItem(12, createItem(
-            freshStart ? Material.LIME_DYE : Material.RED_DYE,
+        inv.setItem(14, createItem(
+            freshStart ? Material.GOLDEN_APPLE : Material.ROTTEN_FLESH,
             "Fresh Start Players",
             "Click to toggle",
             "Currently: " + (freshStart ? "ON" : "OFF"),
             "Clears inventory/XP on reset"
         ));
         
-        inv.setItem(13, createItem(
-            countdown ? Material.LIME_DYE : Material.RED_DYE,
-            "Countdown",
+        inv.setItem(16, createItem(
+            backups ? Material.CHEST : Material.BARRIER,
+            "Create Backups",
             "Click to toggle",
-            "Currently: " + (countdown ? "ON" : "OFF")
+            "Currently: " + (backups ? "ON" : "OFF")
         ));
         
-        inv.setItem(14, createItem(
-            preload ? Material.LIME_DYE : Material.RED_DYE,
+        // Row 2: Player and countdown settings
+        inv.setItem(19, createItem(
+            returnPlayers ? Material.COMPASS : Material.BARRIER,
+            "Return Players to Spawn",
+            "Click to toggle",
+            "Currently: " + (returnPlayers ? "ON" : "OFF")
+        ));
+        
+        // Countdown seconds - click to cycle
+        int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
+        inv.setItem(21, createItem(
+            Material.CLOCK,
+            "Countdown: " + (seconds <= 0 ? "OFF" : seconds + "s"),
+            "Click to change",
+            "Cycles: OFF, 3, 5, 10, 15, 30"
+        ));
+        
+        inv.setItem(23, createItem(
+            broadcastCountdown ? Material.BELL : Material.REDSTONE_TORCH,
+            "Broadcast Countdown",
+            "Click to toggle",
+            "Currently: " + (broadcastCountdown ? "To all players" : "To affected players only")
+        ));
+        
+        inv.setItem(25, createItem(
+            preload ? Material.ICE : Material.BLUE_ICE,
             "Preload Worlds",
             "Click to toggle",
             "Currently: " + (preload ? "ON" : "OFF"),
             "Pre-generate worlds for faster resets"
         ));
         
-        // Countdown seconds - click to cycle
-        int seconds = plugin.getConfig().getInt("countdown.seconds", 5);
-        inv.setItem(21, createItem(
-            Material.CLOCK,
-            "Countdown: " + seconds + "s",
-            "Click to change",
-            "Cycles: 3, 5, 10, 15, 30"
-        ));
-        
-        // Teleport distances
+        // Row 3: Teleport mode specific settings
         if (teleportMode) {
             int playerDist = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
             int othersDist = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
             
-            inv.setItem(22, createItem(
+            inv.setItem(28, createItem(
                 Material.COMPASS,
                 "Your Distance: " + playerDist,
                 "Click to cycle",
                 "How far you teleport"
             ));
             
-            inv.setItem(23, createItem(
-                Material.COMPASS,
+            inv.setItem(30, createItem(
+                Material.LODESTONE,
                 "Others Distance: " + othersDist,
                 "Click to cycle", 
                 "How far others teleport"
             ));
+            
+            inv.setItem(32, createItem(
+                resetNetherEnd ? Material.NETHERRACK : Material.BARRIER,
+                "Reset Nether & End",
+                "Click to toggle",
+                "Currently: " + (resetNetherEnd ? "ON - Nether/End reset too" : "OFF - Only teleport players")
+            ));
         }
         
-        inv.setItem(31, createItem(Material.ARROW, "Back to BetterReset"));
+        inv.setItem(40, createItem(Material.ARROW, "Back to BetterReset"));
         
         p.openInventory(inv);
     }
@@ -525,7 +563,7 @@ public class SimpleGuiManager implements Listener {
             return;
         }
         
-        // Toggle settings
+        // Toggle settings - Fixed config paths
         if (itemName.startsWith("Mode:")) {
             boolean current = plugin.getConfig().getBoolean("teleportMode.enabled", false);
             plugin.getConfig().set("teleportMode.enabled", !current);
@@ -534,38 +572,57 @@ public class SimpleGuiManager implements Listener {
             Messages.send(p, (current ? "&cDisabled" : "&aEnabled") + " teleport mode");
         }
         else if (itemName.equals("Require Confirmation")) {
-            boolean current = plugin.getConfig().getBoolean("confirmation.require", true);
-            plugin.getConfig().set("confirmation.require", !current);
+            boolean current = plugin.getConfig().getBoolean("confirmation.requireConfirm", true);
+            plugin.getConfig().set("confirmation.requireConfirm", !current);
             plugin.saveConfig();
             openSettingsMenu(p);
         }
         else if (itemName.equals("Fresh Start Players")) {
-            boolean current = plugin.getConfig().getBoolean("players.freshStart", true);
-            plugin.getConfig().set("players.freshStart", !current);
+            boolean current = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
+            plugin.getConfig().set("players.freshStartOnReset", !current);
             plugin.saveConfig();
             openSettingsMenu(p);
         }
-        else if (itemName.equals("Countdown")) {
-            boolean current = plugin.getConfig().getBoolean("countdown.enabled", true);
-            plugin.getConfig().set("countdown.enabled", !current);
+        else if (itemName.equals("Create Backups")) {
+            boolean current = plugin.getConfig().getBoolean("backups.enabled", true);
+            plugin.getConfig().set("backups.enabled", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        }
+        else if (itemName.equals("Return Players to Spawn")) {
+            boolean current = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
+            plugin.getConfig().set("players.returnToNewSpawnAfterReset", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        }
+        else if (itemName.equals("Broadcast Countdown")) {
+            boolean current = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
+            plugin.getConfig().set("countdown.broadcastToAll", !current);
             plugin.saveConfig();
             openSettingsMenu(p);
         }
         else if (itemName.equals("Preload Worlds")) {
-            boolean current = plugin.getConfig().getBoolean("preload.enabled", false);
+            boolean current = plugin.getConfig().getBoolean("preload.enabled", true);
             plugin.getConfig().set("preload.enabled", !current);
             plugin.saveConfig();
             openSettingsMenu(p);
         }
+        else if (itemName.equals("Reset Nether & End")) {
+            boolean current = plugin.getConfig().getBoolean("teleportMode.resetNetherEnd", true);
+            plugin.getConfig().set("teleportMode.resetNetherEnd", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        }
         else if (itemName.startsWith("Countdown:")) {
-            // Cycle through countdown options
-            int current = plugin.getConfig().getInt("countdown.seconds", 5);
+            // Cycle through countdown options including OFF
+            int current = plugin.getConfig().getInt("countdown.seconds", 10);
             int next = switch(current) {
+                case 0 -> 3;
                 case 3 -> 5;
                 case 5 -> 10;
                 case 10 -> 15;
                 case 15 -> 30;
-                default -> 3;
+                default -> 0; // OFF
             };
             plugin.getConfig().set("countdown.seconds", next);
             plugin.saveConfig();
@@ -577,8 +634,8 @@ public class SimpleGuiManager implements Listener {
             int next = switch(current) {
                 case 5000 -> 10000;
                 case 10000 -> 15000;
-                case 15000 -> 25000;
-                case 25000 -> 50000;
+                case 15000 -> 20000;
+                case 20000 -> 50000;
                 default -> 5000;
             };
             plugin.getConfig().set("teleportMode.playerDistance", next);
@@ -589,8 +646,8 @@ public class SimpleGuiManager implements Listener {
             // Cycle through distance options
             int current = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
             int next = switch(current) {
-                case 10000 -> 25000;
-                case 25000 -> 50000;
+                case 10000 -> 20000;
+                case 20000 -> 50000;
                 case 50000 -> 75000;
                 case 75000 -> 100000;
                 default -> 10000;

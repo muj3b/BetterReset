@@ -1,18 +1,5 @@
 package com.muj3b.betterreset.ui;
 
-import org.bukkit.entity.Player;
-
-/**
- * Deprecated GUI manager kept as a stub to maintain source compatibility.
- * The simplified GUI is implemented in SimpleGuiManager.
- */
-public class GuiManager {
-    public void openMain(Player p) {}
-    public void openSettings(Player p) {}
-    public void openSettingsSection(Player p, String section) {}
-}
-*/
-/*
 import com.muj3b.betterreset.FullResetPlugin;
 import com.muj3b.betterreset.core.ResetService;
 import com.muj3b.betterreset.util.BackupManager;
@@ -25,17 +12,16 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-// removed unused import
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.configuration.ConfigurationSection;
 
 import java.util.*;
@@ -122,6 +108,10 @@ public class GuiManager implements Listener {
         ItemStack it = e.getCurrentItem();
         if (it == null || !it.hasItemMeta()) return;
         ItemMeta meta = it.getItemMeta();
+        // Strict ownership check: only handle items tagged by BetterReset
+        try {
+            if (!meta.getPersistentDataContainer().has(new NamespacedKey("betterreset","ui"), PersistentDataType.BYTE)) return;
+        } catch (Throwable ignored) {}
         Component dnComp = meta.displayName();
         if (dnComp == null) return;
         String displayName = PlainTextComponentSerializer.plainText().serialize(dnComp);
@@ -138,13 +128,14 @@ public class GuiManager implements Listener {
                 switch (displayName.toLowerCase(Locale.ROOT)) {
                     case "reset worlds" -> openWorldSelect(p);
                     case "archives" -> openBackups(p);
-                    case "settings" -> openSettings(p);
+                    case "settings" -> openSimpleSettings(p);
                     default -> {}
                 }
             }
             case SELECT -> {
-                if (displayName.equalsIgnoreCase("Back")) openMain(p);
-                else openResetOptions(p, displayName);
+                if (displayName.equalsIgnoreCase("Back") || displayName.equalsIgnoreCase("Back to BetterReset")) {
+                    Bukkit.getScheduler().runTask(plugin, () -> openMain(p));
+                } else openResetOptions(p, displayName);
             }
             case RESET_OPTIONS -> handleResetOptionsClick(p, displayName);
             case BACKUPS -> handleBackupsClick(p, displayName, meta);
@@ -152,11 +143,17 @@ public class GuiManager implements Listener {
             case DELETE_BACKUP -> handleDeleteBackupClick(p, displayName, meta);
             case DELETE_ALL -> handleDeleteAllClick(p, displayName);
             case DELETE_ALL_GLOBAL -> handleDeleteAllGlobalClick(p, displayName);
+            case SIMPLE_SETTINGS -> handleSimpleSettingsClick(p, displayName);
             case SETTINGS -> handleSettingsClick(p, displayName, e.getClick());
             case SETTINGS_SECTION -> handleSettingsSectionClick(p, meta, displayName);
             case SETTING_EDIT -> handleSettingEditorClick(p, meta, displayName);
             case SEED_SELECTOR -> handleSeedSelectorClick(p, displayName);
             case MESSAGES -> handleMessagesClick(p, displayName);
+            // Missing case labels for legacy SimpleGuiManager compatibility
+            case RESET -> {} // Handled by SimpleGuiManager
+            case ARCHIVES -> {} // Handled by SimpleGuiManager
+            case ARCHIVE_OPTIONS -> {} // Handled by SimpleGuiManager
+            case CONFIG_BROWSER -> {} // Not implemented yet
         }
     }
 
@@ -176,7 +173,7 @@ public class GuiManager implements Listener {
         Inventory inv = Bukkit.createInventory(holder, 27, TITLE_SELECT);
         holder.setInventory(inv);
         inv.setItem(13, namedComponent(Material.GRASS_BLOCK, TextComponents.green(base), TextComponents.gray("Click to configure")));
-        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
         p.openInventory(inv);
     }
 
@@ -209,11 +206,177 @@ public class GuiManager implements Listener {
             inv.setItem(22, namedComponent(Material.LIME_WOOL, TextComponents.green("Reset Selected (Random Seed)")));
             inv.setItem(24, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Reset Selected (Custom Seed)")));
         }
-        inv.setItem(40, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(40, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
         p.openInventory(inv);
     }
 
     private void openBackups(Player p) { openBackupsFiltered(p, null); }
+
+    // ===== Simple Settings (single page) =====
+    public void openSimpleSettings(Player p) {
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.SIMPLE_SETTINGS, TextComponents.blue("BetterReset | Simple Settings"));
+        Inventory inv = Bukkit.createInventory(holder, 45, holder.getTitle()); // Increased from 27 to 45 for more options
+        holder.setInventory(inv);
+
+        boolean teleportMode = plugin.getConfig().getBoolean("teleportMode.enabled", false);
+        boolean requireConfirm = plugin.getConfig().getBoolean("confirmation.requireConfirm", true);
+        boolean freshStart = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
+        boolean preload = plugin.getConfig().getBoolean("preload.enabled", true);
+        boolean backups = plugin.getConfig().getBoolean("backups.enabled", true);
+        boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
+        boolean resetAllOnline = plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true);
+        boolean broadcastCountdown = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
+        boolean resetNetherEnd = plugin.getConfig().getBoolean("teleportMode.resetNetherEnd", true);
+        int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
+
+        // Row 1: Core mode settings
+        inv.setItem(10, namedComponent(Material.LEVER, TextComponents.white("Mode: " + (teleportMode ? "Teleport" : "Reset")),
+                TextComponents.gray("Click to switch")));
+        inv.setItem(12, namedComponent(requireConfirm ? Material.LIME_DYE : Material.RED_DYE, TextComponents.white("Require Confirmation"),
+                TextComponents.gray(requireConfirm ? "ON" : "OFF")));
+        inv.setItem(14, namedComponent(freshStart ? Material.GOLDEN_APPLE : Material.ROTTEN_FLESH, TextComponents.white("Fresh Start Players"),
+                TextComponents.gray(freshStart ? "ON" : "OFF")));
+        inv.setItem(16, namedComponent(backups ? Material.CHEST : Material.BARRIER, TextComponents.white("Create Backups"),
+                TextComponents.gray(backups ? "ON" : "OFF")));
+
+        // Row 2: Countdown and player settings
+        String cdLabel = seconds <= 0 ? "Countdown: OFF" : ("Countdown: " + seconds + "s");
+        inv.setItem(19, namedComponent(Material.CLOCK, TextComponents.white(cdLabel),
+                TextComponents.gray("Click to cycle 0/3/5/10/15/30")));
+        inv.setItem(21, namedComponent(broadcastCountdown ? Material.BELL : Material.REDSTONE_TORCH, TextComponents.white("Broadcast Countdown"),
+                TextComponents.gray(broadcastCountdown ? "To all players" : "To affected players only")));
+        inv.setItem(23, namedComponent(returnPlayers ? Material.COMPASS : Material.BARRIER, TextComponents.white("Return Players to Spawn"),
+                TextComponents.gray(returnPlayers ? "ON" : "OFF")));
+        inv.setItem(25, namedComponent(resetAllOnline ? Material.PLAYER_HEAD : Material.SKELETON_SKULL, TextComponents.white("Reset All Online Players"),
+                TextComponents.gray(resetAllOnline ? "Fresh start for all" : "Only affected players")));
+
+        // Row 3: Advanced settings
+        inv.setItem(28, namedComponent(preload ? Material.ICE : Material.BLUE_ICE, TextComponents.white("Preload Worlds"),
+                TextComponents.gray(preload ? "ON" : "OFF")));
+
+        // Teleport mode specific settings
+        if (teleportMode) {
+            int pd = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
+            int od = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
+            inv.setItem(30, namedComponent(Material.COMPASS, TextComponents.white("Player Distance: " + pd),
+                    TextComponents.gray("Click to cycle")));
+            inv.setItem(32, namedComponent(Material.LODESTONE, TextComponents.white("Others Distance: " + od),
+                    TextComponents.gray("Click to cycle")));
+            inv.setItem(34, namedComponent(resetNetherEnd ? Material.NETHERRACK : Material.BARRIER, TextComponents.white("Reset Nether & End"),
+                    TextComponents.gray(resetNetherEnd ? "ON - Nether/End reset too" : "OFF - Only teleport players")));
+        }
+
+        // Admin-only Advanced Settings
+        if (p.hasPermission("betterreset.admin")) {
+            inv.setItem(36, namedComponent(Material.REDSTONE_BLOCK, TextComponents.darkRed("Advanced Settings"),
+                    TextComponents.gray("Full config editor")));
+        }
+
+        inv.setItem(44, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
+
+        p.openInventory(inv);
+    }
+
+    private void handleSimpleSettingsClick(Player p, String displayName) {
+        switch (displayName) {
+            case "Back", "Back to BetterReset" -> { openMain(p); return; }
+            case "Advanced Settings" -> {
+                if (p.hasPermission("betterreset.admin")) openSettings(p);
+                else Messages.send(p, plugin.getConfig().getString("messages.noPermission"));
+                return;
+            }
+        }
+        if (displayName.startsWith("Mode: ")) {
+            boolean enabled = plugin.getConfig().getBoolean("teleportMode.enabled", false);
+            plugin.getConfig().set("teleportMode.enabled", !enabled);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.equals("Require Confirmation")) {
+            boolean cur = plugin.getConfig().getBoolean("confirmation.requireConfirm", true);
+            plugin.getConfig().set("confirmation.requireConfirm", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.equals("Fresh Start Players")) {
+            boolean cur = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
+            plugin.getConfig().set("players.freshStartOnReset", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.equals("Create Backups")) {
+            boolean cur = plugin.getConfig().getBoolean("backups.enabled", true);
+            plugin.getConfig().set("backups.enabled", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.equals("Broadcast Countdown")) {
+            boolean cur = plugin.getConfig().getBoolean("countdown.broadcastToAll", true);
+            plugin.getConfig().set("countdown.broadcastToAll", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.equals("Return Players to Spawn")) {
+            boolean cur = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
+            plugin.getConfig().set("players.returnToNewSpawnAfterReset", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.equals("Reset All Online Players")) {
+            boolean cur = plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true);
+            plugin.getConfig().set("players.resetAllOnlineAfterReset", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.equals("Reset Nether & End")) {
+            boolean cur = plugin.getConfig().getBoolean("teleportMode.resetNetherEnd", true);
+            plugin.getConfig().set("teleportMode.resetNetherEnd", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.startsWith("Countdown:")) {
+            int cur = plugin.getConfig().getInt("countdown.seconds", 10);
+            int[] steps = new int[]{0,3,5,10,15,30};
+            int nextIndex = 0;
+            for (int i = 0; i < steps.length; i++) { if (steps[i] == cur) { nextIndex = (i+1)%steps.length; break; } }
+            plugin.getConfig().set("countdown.seconds", steps[nextIndex]);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.startsWith("Preload Worlds")) {
+            boolean cur = plugin.getConfig().getBoolean("preload.enabled", true);
+            plugin.getConfig().set("preload.enabled", !cur);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.startsWith("Player Distance:")) {
+            int cur = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
+            int[] steps = new int[]{5000,10000,15000,20000,50000};
+            int nextIndex = 0; for (int i=0;i<steps.length;i++){ if (steps[i]==cur){ nextIndex=(i+1)%steps.length; break; } }
+            plugin.getConfig().set("teleportMode.playerDistance", steps[nextIndex]);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+            return;
+        }
+        if (displayName.startsWith("Others Distance:")) {
+            int cur = plugin.getConfig().getInt("teleportMode.othersDistance", 50000);
+            int[] steps = new int[]{10000,20000,50000,75000,100000};
+            int nextIndex = 0; for (int i=0;i<steps.length;i++){ if (steps[i]==cur){ nextIndex=(i+1)%steps.length; break; } }
+            plugin.getConfig().set("teleportMode.othersDistance", steps[nextIndex]);
+            plugin.saveConfig();
+            openSimpleSettings(p);
+        }
+    }
 
     private void openBackupsFiltered(Player p, String filterBase) {
         // update filter & reset page if changed
@@ -313,7 +476,7 @@ public class GuiManager implements Listener {
         if (filterBase != null) {
             inv.setItem(52, namedComponent(Material.BOOK, TextComponents.white("Show All Archives")));
         }
-        inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(53, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
         p.openInventory(inv);
     }
 
@@ -329,7 +492,7 @@ public class GuiManager implements Listener {
         int keep = 2; try { keep = Math.max(0, plugin.getConfig().getInt("backups.pruneNowKeepPerBase", 2)); } catch (Exception ignored) {}
         inv.setItem(18, namedComponent(Material.SHEARS, TextComponents.red("Prune Base (Keep " + keep + ")")));
         inv.setItem(20, namedComponent(Material.TNT, TextComponents.red("Delete Archive")));
-        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(22, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
         // attach timestamp/base to all actionable items
         for (int idx : new int[]{10,12,14,16,18,20}) {
             ItemStack it = inv.getItem(idx);
@@ -383,7 +546,7 @@ public class GuiManager implements Listener {
         if (seeds.isEmpty()) inv.setItem(13, namedComponent(Material.PAPER, TextComponents.gray("No recent seeds")));
         else for (int i = 0; i < seeds.size() && slot < 17; i++) inv.setItem(slot++, namedComponent(Material.PAPER, TextComponents.white("[" + i + "] " + seeds.get(i)), TextComponents.gray("Click to use")));
         inv.setItem(22, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Type Custom Seed")));
-        inv.setItem(26, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(26, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
         awaitingSeedForWorld.put(p.getUniqueId(), base + ";" + dims.stream().map(Enum::name).collect(Collectors.joining(",")));
         p.openInventory(inv);
     }
@@ -396,7 +559,7 @@ public class GuiManager implements Listener {
             case "Overworld" -> toggleDim(p, base, dims, ResetService.Dimension.OVERWORLD);
             case "Nether" -> toggleDim(p, base, dims, ResetService.Dimension.NETHER);
             case "The End" -> toggleDim(p, base, dims, ResetService.Dimension.END);
-            case "Back" -> openWorldSelect(p);
+            case "Back", "Back to BetterReset" -> openWorldSelect(p);
             case "Reset Selected (Random Seed)" -> {
                 p.closeInventory();
                 if (plugin.getConfig().getBoolean("teleportMode.enabled", false)) resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims);
@@ -413,7 +576,7 @@ public class GuiManager implements Listener {
     }
 
     private void handleBackupsClick(Player p, String displayName, ItemMeta meta) {
-        if (displayName.equalsIgnoreCase("Back")) { openMain(p); return; }
+        if (displayName.equalsIgnoreCase("Back") || displayName.equalsIgnoreCase("Back to BetterReset")) { Bukkit.getScheduler().runTask(plugin, () -> openMain(p)); return; }
         if (displayName.equalsIgnoreCase("Prune Now") || displayName.startsWith("Prune ALL")) { resetService.pruneBackupsAsync(p, Optional.empty(), true); return; }
         if (displayName.equalsIgnoreCase("Delete ALL Archives")) { openDeleteAllGlobalConfirm(p); return; }
         if (displayName.equalsIgnoreCase("Show All Archives")) { openBackupsFiltered(p, null); return; }
@@ -456,7 +619,7 @@ public class GuiManager implements Listener {
         if (base == null) base = selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName()));
         if (ts == null) ts = "";
         switch (displayName) {
-            case "Back", "Back to Archives" -> { UUID id = p.getUniqueId(); openBackupsFiltered(p, archivesFilter.get(id)); }
+            case "Back", "Back to Archives" -> { UUID id = p.getUniqueId(); String f = archivesFilter.get(id); Bukkit.getScheduler().runTask(plugin, () -> openBackupsFiltered(p, f)); }
             case "Restore ALL" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts); }
             case "Restore Overworld" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.OVERWORLD)); }
             case "Restore Nether" -> { p.closeInventory(); resetService.restoreBackupAsync(p, base, ts, EnumSet.of(ResetService.Dimension.NETHER)); }
@@ -480,7 +643,7 @@ public class GuiManager implements Listener {
         }
         switch (displayName) {
             case "Confirm Delete" -> { p.closeInventory(); resetService.deleteBackupAsync(p, base, ts); }
-            case "Cancel" -> openBackupOptions(p, base, ts);
+            case "Cancel" -> { String b = base; String t = ts; Bukkit.getScheduler().runTask(plugin, () -> openBackupOptions(p, b, t)); }
             default -> {}
         }
     }
@@ -488,12 +651,12 @@ public class GuiManager implements Listener {
     private void handleDeleteAllClick(Player p, String displayName) {
         String invTitle = PlainTextComponentSerializer.plainText().serialize(((GuiHolder) p.getOpenInventory().getTopInventory().getHolder()).getTitle());
         String base = invTitle.replace("BetterReset | Delete ALL | ", "").replace("Delete ALL | ", "");
-        if (displayName.equalsIgnoreCase("Cancel")) openBackups(p);
+        if (displayName.equalsIgnoreCase("Cancel")) { Bukkit.getScheduler().runTask(plugin, () -> openBackups(p)); }
         else if (displayName.equalsIgnoreCase("Confirm Delete All")) { p.closeInventory(); resetService.deleteAllBackupsForBaseAsync(p, base); }
     }
 
     private void handleSeedSelectorClick(Player p, String displayName) {
-        if (displayName.equalsIgnoreCase("Back")) { openResetOptions(p, selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName()))); return; }
+        if (displayName.equalsIgnoreCase("Back") || displayName.equalsIgnoreCase("Back to BetterReset")) { String base = selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName())); Bukkit.getScheduler().runTask(plugin, () -> openResetOptions(p, base)); return; }
         if (displayName.equalsIgnoreCase("Type Custom Seed")) { p.closeInventory(); Messages.send(p, "&eType a &lseed number&re in chat, or type 'random'."); return; }
         if (displayName.startsWith("[")) {
             int end = displayName.indexOf(']');
@@ -546,14 +709,14 @@ public class GuiManager implements Listener {
     }
 
     private void handleMessagesClick(Player p, String displayName) {
-        if (displayName.equalsIgnoreCase("Back")) { openSettings(p); return; }
+        if (displayName.equalsIgnoreCase("Back") || displayName.equalsIgnoreCase("Back to BetterReset")) { Bukkit.getScheduler().runTask(plugin, () -> openSettings(p)); return; }
         String path = "messages." + displayName;
         awaitingConfigPath.put(p.getUniqueId(), path);
         Messages.send(p, "&eType new text in chat. Color codes use &.");
     }
 
     private void handleSettingsClick(Player p, String dn, org.bukkit.event.inventory.ClickType click) {
-        if (dn.equalsIgnoreCase("Back")) { openMain(p); return; }
+        if (dn.equalsIgnoreCase("Back") || dn.equalsIgnoreCase("Back to BetterReset")) { Bukkit.getScheduler().runTask(plugin, () -> openMain(p)); return; }
         switch (dn) {
             case "Confirmation" -> { openSettingsSection(p, "confirmation"); return; }
             case "Players" -> { openSettingsSection(p, "players"); return; }
@@ -667,7 +830,7 @@ public class GuiManager implements Listener {
         if (p.hasPermission("betterreset.messages")) {
             inv.setItem(16, namedComponent(Material.PAPER, TextComponents.white("Messages"), TextComponents.gray("Edit configurable text")));
         }
-        inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
         p.openInventory(inv);
     }
 
@@ -687,13 +850,13 @@ public class GuiManager implements Listener {
         } else {
             inv.setItem(13, namedComponent(Material.BARRIER, TextComponents.red("No messages section")));
         }
-        inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back")));
+        inv.setItem(49, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
         p.openInventory(inv);
     }
 
     public void openSettingsSection(Player p, String section) {
         lastSettingsSection.put(p.getUniqueId(), section);
-        Component title = TextComponents.blue("Settings | ").append(Component.text(section));
+        // Title composed purely for readability retained in holder below
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SETTINGS_SECTION, TextComponents.blue("BetterReset | Settings | ").append(Component.text(section)));
         Inventory inv = Bukkit.createInventory(holder, 54, holder.getTitle());
         holder.setInventory(inv);
@@ -755,6 +918,8 @@ public class GuiManager implements Listener {
         if (m != null) {
             m.displayName(name);
             m.lore(lore);
+            // Tag item as BetterReset UI
+            try { m.getPersistentDataContainer().set(new NamespacedKey("betterreset","ui"), PersistentDataType.BYTE, (byte)1); } catch (Throwable ignored) {}
             m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_section"), PersistentDataType.STRING, section);
             m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_key"), PersistentDataType.STRING, key);
             m.getPersistentDataContainer().set(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING, type);
@@ -765,7 +930,7 @@ public class GuiManager implements Listener {
 
     private void handleSettingsSectionClick(Player p, ItemMeta meta, String displayName) {
         // Back navigation buttons
-        if ("Back to Categories".equalsIgnoreCase(displayName) || "Back".equalsIgnoreCase(displayName)) { openSettings(p); return; }
+        if ("Back to Categories".equalsIgnoreCase(displayName) || "Back".equalsIgnoreCase(displayName)) { Bukkit.getScheduler().runTask(plugin, () -> openSettings(p)); return; }
         String section = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_section"), PersistentDataType.STRING);
         String key = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_key"), PersistentDataType.STRING);
         String type = meta.getPersistentDataContainer().get(new NamespacedKey(plugin, "cfg_type"), PersistentDataType.STRING);
