@@ -551,7 +551,8 @@ public class GuiManager implements Listener {
         p.openInventory(inv);
     }
 
-    private void openSeedSelector(Player p, String base, EnumSet<ResetService.Dimension> dims) {
+    // Overload with explicit mode so we can disambiguate later
+    private void openSeedSelector(Player p, String base, EnumSet<ResetService.Dimension> dims, boolean teleportMode) {
         GuiHolder holder = new GuiHolder(GuiHolder.Type.SEED_SELECTOR, TextComponents.darkPurple("BetterReset | Select Seed | ").append(Component.text(base)));
         Inventory inv = Bukkit.createInventory(holder, 27, holder.getTitle());
         holder.setInventory(inv);
@@ -561,7 +562,9 @@ public class GuiManager implements Listener {
         else for (int i = 0; i < seeds.size() && slot < 17; i++) inv.setItem(slot++, namedComponent(Material.PAPER, TextComponents.white("[" + i + "] " + seeds.get(i)), TextComponents.gray("Click to use")));
         inv.setItem(22, namedComponent(Material.CYAN_WOOL, TextComponents.blue("Type Custom Seed")));
         inv.setItem(26, namedComponent(Material.ARROW, TextComponents.yellow("Back to BetterReset")));
-        awaitingSeedForWorld.put(p.getUniqueId(), base + ";" + dims.stream().map(Enum::name).collect(Collectors.joining(",")));
+        String dimsStr = dims.stream().map(Enum::name).collect(Collectors.joining(","));
+        String mode = teleportMode ? "MODE=TELEPORT" : "MODE=RESET";
+        awaitingSeedForWorld.put(p.getUniqueId(), base + ";" + dimsStr + ";" + mode);
         p.openInventory(inv);
     }
 
@@ -574,14 +577,10 @@ public class GuiManager implements Listener {
             case "Nether" -> toggleDim(p, base, dims, ResetService.Dimension.NETHER);
             case "The End" -> toggleDim(p, base, dims, ResetService.Dimension.END);
             case "Back", "Back to BetterReset" -> openWorldSelect(p);
-            case "Reset Selected (Random Seed)" -> {
-                p.closeInventory();
-                if (plugin.getConfig().getBoolean("teleportMode.enabled", false)) resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims);
-                else resetService.startReset(p, base, dims);
-            }
-            case "Reset Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims); }
+            case "Reset Selected (Random Seed)" -> { p.closeInventory(); resetService.startReset(p, base, dims); }
+            case "Reset Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims, false); }
             case "Teleport Selected (Random Seed)" -> { p.closeInventory(); resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims); }
-            case "Teleport Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims); }
+            case "Teleport Selected (Custom Seed)" -> { p.closeInventory(); openSeedSelector(p, base, dims, true); }
             case "Teleport Now" -> { p.closeInventory(); resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims); }
             case "Mode: Teleport" -> { plugin.getConfig().set("teleportMode.enabled", false); plugin.saveConfig(); openResetOptions(p, base); }
             case "Mode: Reset" -> { plugin.getConfig().set("teleportMode.enabled", true); plugin.saveConfig(); openResetOptions(p, base); }
@@ -683,20 +682,27 @@ public class GuiManager implements Listener {
                         String ctx = awaitingSeedForWorld.remove(p.getUniqueId());
                         String base = selectedBase.getOrDefault(p.getUniqueId(), baseName(p.getWorld().getName()));
                         EnumSet<ResetService.Dimension> dims = EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END);
+                        boolean modeTeleport = plugin.getConfig().getBoolean("teleportMode.enabled", false);
                         if (ctx != null && ctx.contains(";")) {
                             String[] parts = ctx.split(";", 2);
                             base = parts[0];
-                            if (parts.length > 1 && !parts[1].isEmpty()) {
+                            // Try to parse dims and optional MODE entry
+                            String rest = parts.length > 1 ? parts[1] : "";
+                            String dimsPart = rest;
+                            String modePart = null;
+                            int semi = rest.indexOf(';');
+                            if (semi >= 0) { dimsPart = rest.substring(0, semi); modePart = rest.substring(semi + 1); }
+                            if (!dimsPart.isEmpty()) {
                                 dims = EnumSet.noneOf(ResetService.Dimension.class);
-                                for (String s : parts[1].split(",")) dims.add(ResetService.Dimension.valueOf(s));
+                                for (String s : dimsPart.split(",")) if (!s.isEmpty()) dims.add(ResetService.Dimension.valueOf(s));
+                            }
+                            if (modePart != null && modePart.startsWith("MODE=")) {
+                                modeTeleport = "MODE=TELEPORT".equalsIgnoreCase(modePart);
                             }
                         }
                         p.closeInventory();
-                        if (plugin.getConfig().getBoolean("teleportMode.enabled", false)) {
-                            resetService.startTeleportWithCountdown(p, base, Optional.of(seed), dims);
-                        } else {
-                            resetService.startResetWithCountdown(p, base, Optional.of(seed), dims);
-                        }
+                        if (modeTeleport) resetService.startTeleportWithCountdown(p, base, Optional.of(seed), dims);
+                        else resetService.startResetWithCountdown(p, base, Optional.of(seed), dims);
                     }
                 } catch (NumberFormatException ignored) {}
             }

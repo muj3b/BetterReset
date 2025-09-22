@@ -275,13 +275,15 @@ public class SimpleGuiManager implements Listener {
                 toggleDimension(dims, ResetService.Dimension.END);
                 openResetMenu(p);
             }
-            case "Reset Now!", "Teleport Now!" -> {
+            case "Reset Now!" -> {
                 p.closeInventory();
-                if (plugin.getConfig().getBoolean("teleportMode.enabled", false)) {
-                    resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims);
-                } else {
-                    resetService.startReset(p, base, dims);
-                }
+                // Always perform a full reset when the Reset action is clicked
+                resetService.startReset(p, base, dims);
+            }
+            case "Teleport Now!" -> {
+                p.closeInventory();
+                // Always perform teleport-mode when the Teleport action is clicked
+                resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims);
             }
         }
     }

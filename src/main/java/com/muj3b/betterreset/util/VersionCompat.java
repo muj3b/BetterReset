@@ -1,6 +1,5 @@
 package com.muj3b.betterreset.util;
 
-import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
@@ -14,27 +13,19 @@ import org.jetbrains.annotations.NotNull;
 import java.util.function.Consumer;
 
 /**
- * Utility class for handling different Minecraft versions gracefully
+ * Version compatibility helper that avoids hard dependencies on Paper-only APIs.
+ * - Chat input: uses AsyncPlayerChatEvent on all platforms (Paper, Purpur, Spigot, Bukkit).
+ * - World height helpers: reflects modern API when available.
  */
 public final class VersionCompat implements Listener {
-    
-    private static final boolean HAS_PAPER_CHAT = checkPaperChat();
+
     private static final boolean HAS_MODERN_WORLD = checkModernWorld();
-    
+
     private final Consumer<ChatMessage> messageHandler;
 
     public VersionCompat(@NotNull org.bukkit.plugin.Plugin plugin, @NotNull Consumer<ChatMessage> messageHandler) {
         this.messageHandler = messageHandler;
         if (plugin != null) Bukkit.getPluginManager().registerEvents(this, plugin);
-    }
-
-    private static boolean checkPaperChat() {
-        try {
-            Class.forName("io.papermc.paper.event.player.AsyncChatEvent");
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
     }
 
     private static boolean checkModernWorld() {
@@ -46,12 +37,7 @@ public final class VersionCompat implements Listener {
         }
     }
 
-    /**
-     * Get the minimum height for a world with version compatibility
-     *
-     * @param world The world
-     * @return The minimum height
-     */
+    // Height helpers
     public static int getMinHeight(@NotNull World world) {
         if (HAS_MODERN_WORLD) {
             return world.getMinHeight();
@@ -59,12 +45,6 @@ public final class VersionCompat implements Listener {
         return 0; // Pre-1.16 worlds always started at 0
     }
 
-    /**
-     * Get the maximum height for a world with version compatibility
-     *
-     * @param world The world
-     * @return The maximum height
-     */
     public static int getMaxHeight(@NotNull World world) {
         if (HAS_MODERN_WORLD) {
             return world.getMaxHeight();
@@ -72,17 +52,10 @@ public final class VersionCompat implements Listener {
         return 256; // Pre-1.16 worlds were always 256 blocks tall
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPaperChat(AsyncChatEvent e) {
-        if (!HAS_PAPER_CHAT) return;
-        messageHandler.accept(new ChatMessage(e.getPlayer(), e.message()));
-        e.setCancelled(true);
-    }
-
+    // Single chat handler that works across Paper/Spigot/Purpur
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     @SuppressWarnings("deprecation")
-    public void onLegacyChat(AsyncPlayerChatEvent e) {
-        if (HAS_PAPER_CHAT) return;
+    public void onChat(AsyncPlayerChatEvent e) {
         messageHandler.accept(new ChatMessage(e.getPlayer(), Component.text(e.getMessage())));
         e.setCancelled(true);
     }
@@ -100,18 +73,12 @@ public final class VersionCompat implements Listener {
         }
 
         @NotNull
-        public Player getPlayer() {
-            return player;
-        }
+        public Player getPlayer() { return player; }
 
         @NotNull
-        public Component getMessage() {
-            return message;
-        }
+        public Component getMessage() { return message; }
 
         @NotNull
-        public String getMessageText() {
-            return TextExtractor.getText(message);
-        }
+        public String getMessageText() { return TextExtractor.getText(message); }
     }
 }
