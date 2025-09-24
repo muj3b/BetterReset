@@ -10,7 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Version compatibility helper that avoids hard dependencies on Paper-only APIs.
@@ -21,9 +21,9 @@ public final class VersionCompat implements Listener {
 
     private static final boolean HAS_MODERN_WORLD = checkModernWorld();
 
-    private final Consumer<ChatMessage> messageHandler;
+    private final Predicate<ChatMessage> messageHandler;
 
-    public VersionCompat(@NotNull org.bukkit.plugin.Plugin plugin, @NotNull Consumer<ChatMessage> messageHandler) {
+    public VersionCompat(@NotNull org.bukkit.plugin.Plugin plugin, @NotNull Predicate<ChatMessage> messageHandler) {
         this.messageHandler = messageHandler;
         if (plugin != null) Bukkit.getPluginManager().registerEvents(this, plugin);
     }
@@ -56,8 +56,19 @@ public final class VersionCompat implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     @SuppressWarnings("deprecation")
     public void onChat(AsyncPlayerChatEvent e) {
-        messageHandler.accept(new ChatMessage(e.getPlayer(), Component.text(e.getMessage())));
-        e.setCancelled(true);
+        boolean consumed = false;
+        try {
+            consumed = messageHandler.test(new ChatMessage(e.getPlayer(), Component.text(e.getMessage())));
+        } catch (Exception ex) {
+            try {
+                Bukkit.getLogger().warning("BetterReset VersionCompat chat handler error: " + ex.getMessage());
+            } catch (Exception ignored) {
+                // ignore secondary logging failures
+            }
+        }
+        if (consumed) {
+            e.setCancelled(true);
+        }
     }
 
     /**

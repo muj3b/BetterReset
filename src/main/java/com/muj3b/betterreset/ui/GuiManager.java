@@ -59,7 +59,7 @@ public class GuiManager implements Listener {
         this.plugin = plugin;
         this.resetService = resetService;
         Bukkit.getPluginManager().registerEvents(this, plugin);
-    try { new VersionCompat(plugin, this::onChatMessage); } catch (Throwable ignored) {}
+        try { new VersionCompat(plugin, this::handleChatMessage); } catch (Throwable ignored) {}
     }
 
     private static ItemStack namedComponent(Material mat, Component name, Component... lore) {
@@ -889,11 +889,11 @@ public class GuiManager implements Listener {
     private boolean isGuiDebug() { try { return plugin.getConfig().getBoolean("debug.gui", false); } catch (Exception ignored) { return false; } }
 
     // VersionCompat delivers ChatMessage objects; adapt callback here
-    private void onChatMessage(com.muj3b.betterreset.util.VersionCompat.ChatMessage msg) {
+    private boolean handleChatMessage(com.muj3b.betterreset.util.VersionCompat.ChatMessage msg) {
         Player p = msg.getPlayer();
         UUID id = p.getUniqueId();
         String path = awaitingConfigPath.remove(id);
-        if (path == null) return;
+        if (path == null) return false;
         String text = msg.getMessageText();
         if (text == null) text = "";
         // Determine expected type
@@ -942,6 +942,7 @@ public class GuiManager implements Listener {
             final String reopen = sec;
             if (reopen != null) Bukkit.getScheduler().runTask(plugin, () -> openSettingsSection(p, reopen));
         }
+        return true;
     }
 
     // Open the settings GUI (minimal stub to be expanded). Required by click handlers.

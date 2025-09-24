@@ -1,5 +1,5 @@
 name: BetterReset
-version: 1.1.1
+version: 1.2.1
 main: com.muj3b.betterreset.FullResetPlugin
 api-version: '1.21'
 author: muj3b
@@ -77,4 +77,7 @@ permissions:
     default: op
   betterreset.test:
     description: Allows /betterreset testreset <base> [--seed <long>]
+    default: op
+  betterreset.force:
+    description: Allows using --force with /betterreset fullreset
     default: op
