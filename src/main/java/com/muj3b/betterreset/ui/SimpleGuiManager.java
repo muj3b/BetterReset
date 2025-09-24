@@ -246,10 +246,10 @@ public class SimpleGuiManager implements Listener {
     private void handleResetClick(Player p, String itemName) {
         UUID id = p.getUniqueId();
         String base = baseName(p.getWorld().getName());
-        EnumSet<ResetService.Dimension> dims = selectedDims.get(id);
-        if (dims == null || dims.isEmpty()) {
-            dims = EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END);
-        }
+        EnumSet<ResetService.Dimension> dims = selectedDims.computeIfAbsent(
+                id,
+                k -> EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END)
+        );
         
         switch (itemName) {
             case "Back to BetterReset" -> openMainMenu(p);
@@ -276,14 +276,22 @@ public class SimpleGuiManager implements Listener {
                 openResetMenu(p);
             }
             case "Reset Now!" -> {
+                if (dims.isEmpty()) {
+                    Messages.send(p, "&cSelect at least one dimension before resetting.");
+                    openResetMenu(p);
+                    return;
+                }
                 p.closeInventory();
-                // Always perform a full reset when the Reset action is clicked
-                resetService.startReset(p, base, dims);
+                resetService.startReset(p, base, EnumSet.copyOf(dims));
             }
             case "Teleport Now!" -> {
+                if (dims.isEmpty()) {
+                    Messages.send(p, "&cSelect at least one dimension before teleporting.");
+                    openResetMenu(p);
+                    return;
+                }
                 p.closeInventory();
-                // Always perform teleport-mode when the Teleport action is clicked
-                resetService.startTeleportWithCountdown(p, base, Optional.empty(), dims);
+                resetService.startTeleportWithCountdown(p, base, Optional.empty(), EnumSet.copyOf(dims));
             }
         }
     }
