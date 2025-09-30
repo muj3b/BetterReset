@@ -4,6 +4,7 @@ import com.muj3b.betterreset.FullResetPlugin;
 import com.muj3b.betterreset.util.BackupManager;
 import com.muj3b.betterreset.util.CountdownManager;
 import com.muj3b.betterreset.util.Messages;
+import com.muj3b.betterreset.util.ConfigKeys;
 import com.muj3b.betterreset.util.MultiverseCompat;
 import com.muj3b.betterreset.util.PreloadManager;
 import com.muj3b.betterreset.util.ResetAuditLogger;
@@ -19,12 +20,28 @@ import org.bukkit.entity.Player;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
+import org.apache.commons.io.FileUtils;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
 
 /**
  * Orchestrates the safe reset flow for worlds.
@@ -42,12 +59,14 @@ public class ResetService {
     private final PreloadManager preloadManager;
 
     private final ResetAuditLogger auditLogger = new ResetAuditLogger();
-    private final Map<UUID, ResetTask> activeTasks = new HashMap<>();
+    private final Map<UUID, ResetTask> activeTasks = new ConcurrentHashMap<>();
     private final Random rng = new Random();
     private final SeedHistory seedHistory;
     private final Map<String, Long> lastResetAt = new ConcurrentHashMap<>();
     private final Map<String, Long> lastResetTimestamp = new ConcurrentHashMap<>();
     private long totalResets = 0;
+    private final AtomicBoolean resetInProgress = new AtomicBoolean(false);
+
 
     public ResetService(FullResetPlugin plugin, ConfirmationManager confirmationManager, CountdownManager countdownManager, MultiverseCompat multiverseCompat, PreloadManager preloadManager) {
         this.plugin = plugin;
@@ -59,56 +78,72 @@ public class ResetService {
         this.seedHistory = plugin.getSeedHistory();
     }
 
-    private volatile boolean resetInProgress = false;
     private volatile String currentTarget = null;
     private volatile String phase = "IDLE";
 
     public void startReset(Player player, String baseWorld, EnumSet<Dimension> dimensions) {
-        int cooldownSeconds = plugin.getConfig().getInt("limits.resetCooldownSeconds", 0);
-        if (cooldownSeconds > 0) {
-            Long last = lastResetAt.get(baseWorld);
-            if (last != null && (System.currentTimeMillis() - last) < (cooldownSeconds * 1000L)) {
-                Messages.send(player, "&cA reset for &6" + baseWorld + "&c was performed recently. Please wait before retrying.");
-                return;
-            }
-        }
-        if (resetInProgress) { Messages.send(player, "&cA reset is already in progress. Please wait."); return; }
-        int maxOnline = plugin.getConfig().getInt("limits.maxOnlineForReset", -1);
-        if (maxOnline >= 0 && Bukkit.getOnlinePlayers().size() > maxOnline) { Messages.send(player, "&cToo many players online to reset now (&e" + Bukkit.getOnlinePlayers().size() + "&c > &e" + maxOnline + "&c)."); return; }
-
-        List<World> affectedWorlds = dimensions.stream().flatMap(dim -> getAffectedWorld(baseWorld, dim).stream()).toList();
-        Optional<Long> effectiveSeed = Optional.of(new Random().nextLong());
-        try { maybePreload(baseWorld, effectiveSeed.get(), dimensions); } catch (Throwable ignored) {}
-        ResetTask task = new ResetTask(baseWorld, dimensions, player, effectiveSeed.orElse(null), affectedWorlds);
-        activeTasks.put(player.getUniqueId(), task);
-
-        int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
-        Messages.send(player, "&eStarting reset countdown for &6" + baseWorld + "&e...");
-        countdownManager.startCountdown(task.getInitiator(), task.getAffectedWorlds(), seconds, () -> {
-            if (!task.isCancelled()) {
-                resetWorldAsync(task.getInitiator(), baseWorld, effectiveSeed, dimensions);
-                lastResetAt.put(baseWorld, System.currentTimeMillis());
-            }
-        });
-        resetInProgress = true; currentTarget = baseWorld; phase = "COUNTDOWN";
+        startResetWithCountdown(player, baseWorld, Optional.empty(), dimensions);
     }
 
     public void startResetWithCountdown(Player player, String baseWorld, Optional<Long> seedOpt, EnumSet<Dimension> dimensions) {
-        if (resetInProgress) { Messages.send(player, "&cA reset is already in progress. Please wait."); return; }
-        List<World> affectedWorlds = dimensions.stream().flatMap(dim -> getAffectedWorld(baseWorld, dim).stream()).toList();
-        Optional<Long> effectiveSeed = seedOpt.isPresent() ? seedOpt : Optional.of(rng.nextLong());
-        try { maybePreload(baseWorld, effectiveSeed.get(), dimensions); } catch (Throwable ignored) {}
-        ResetTask task = new ResetTask(baseWorld, dimensions, player, effectiveSeed.orElse(null), affectedWorlds);
-        activeTasks.put(player.getUniqueId(), task);
-        int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
-        Messages.send(player, "&eStarting reset countdown for &6" + baseWorld + "&e...");
-        countdownManager.startCountdown(task.getInitiator(), task.getAffectedWorlds(), seconds, () -> {
-            if (!task.isCancelled()) {
-                resetWorldAsync(task.getInitiator(), baseWorld, effectiveSeed, dimensions);
-                lastResetAt.put(baseWorld, System.currentTimeMillis());
+        if (!resetInProgress.compareAndSet(false, true)) {
+            Messages.send(player, "&cA reset is already in progress. Please wait.");
+            return;
+        }
+
+        try {
+            int cooldownSeconds = plugin.getConfig().getInt(ConfigKeys.LIMITS_RESET_COOLDOWN_SECONDS, 0);
+            if (cooldownSeconds > 0) {
+                Long last = lastResetAt.get(baseWorld);
+                if (last != null && (System.currentTimeMillis() - last) < (cooldownSeconds * 1000L)) {
+                    Messages.send(player, "&cA reset for &6" + baseWorld + "&c was performed recently. Please wait before retrying.");
+                    resetInProgress.set(false);
+                    return;
+                }
             }
-        });
-        resetInProgress = true; currentTarget = baseWorld; phase = "COUNTDOWN";
+            int maxOnline = plugin.getConfig().getInt(ConfigKeys.LIMITS_MAX_ONLINE_FOR_RESET, -1);
+            if (maxOnline >= 0 && Bukkit.getOnlinePlayers().size() > maxOnline) {
+                Messages.send(player, "&cToo many players online to reset now (&e" + Bukkit.getOnlinePlayers().size() + "&c > &e" + maxOnline + "&c).");
+                resetInProgress.set(false);
+                return;
+            }
+
+            phase = "COUNTDOWN";
+            currentTarget = baseWorld;
+
+            List<World> affectedWorlds = dimensions.stream().flatMap(dim -> getAffectedWorld(baseWorld, dim).stream()).toList();
+            Optional<Long> effectiveSeed = seedOpt.isPresent() ? seedOpt : Optional.of(rng.nextLong());
+            if (effectiveSeed.isPresent()) {
+                try {
+                    maybePreload(baseWorld, effectiveSeed.get(), dimensions);
+                } catch (Throwable e) {
+                    plugin.getLogger().log(Level.WARNING, "Error during preloading", e);
+                }
+            }
+
+            ResetTask task = new ResetTask(baseWorld, dimensions, player, effectiveSeed.orElse(null), affectedWorlds);
+            activeTasks.put(player.getUniqueId(), task);
+            int seconds = plugin.getConfig().getInt(ConfigKeys.COUNTDOWN_SECONDS, 10);
+            Messages.send(player, "&eStarting reset countdown for &6" + baseWorld + "&e...");
+
+            countdownManager.startCountdown(task.getInitiator(), task.getAffectedWorlds(), seconds, () -> {
+                if (!task.isCancelled()) {
+                    resetWorldAsync(task.getInitiator(), baseWorld, effectiveSeed, dimensions);
+                    lastResetAt.put(baseWorld, System.currentTimeMillis());
+                } else {
+                    resetInProgress.set(false);
+                    phase = "IDLE";
+                    currentTarget = null;
+                }
+            });
+
+        } catch (Exception e) {
+            Messages.send(player, "&cFailed to start reset countdown: " + e.getMessage());
+            plugin.getLogger().log(Level.SEVERE, "Failed to start reset countdown for " + baseWorld, e);
+            resetInProgress.set(false);
+            phase = "IDLE";
+            currentTarget = null;
+        }
     }
 
     public void startResetWithCountdown(CommandSender sender, String baseWorld, Optional<Long> seed) {
@@ -131,128 +166,245 @@ public class ResetService {
         final String worldBase = baseWorldName;
         final List<String> worldNames = dimensionNames(worldBase, dims);
         Set<UUID> affectedPlayers = new HashSet<>();
-        for (Player p : Bukkit.getOnlinePlayers()) if (worldNames.contains(p.getWorld().getName())) affectedPlayers.add(p.getUniqueId());
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (p.getWorld() != null && worldNames.contains(p.getWorld().getName())) {
+                affectedPlayers.add(p.getUniqueId());
+            }
+        }
 
         Bukkit.getScheduler().runTask(plugin, () -> {
             try {
                 phase = "RUNNING";
                 auditLogger.log(plugin, "Reset started for '" + worldBase + "'");
                 World fallback = findOrCreateFallbackWorld(worldNames);
-                if (fallback == null) { Messages.send(initiator, "&cFailed to find or create a fallback world; aborting."); resetInProgress = false; phase = "IDLE"; return; }
-
-                for (UUID id : affectedPlayers) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, fallback.getSpawnLocation()); }
-                for (Player online : Bukkit.getOnlinePlayers()) if (worldNames.contains(online.getWorld().getName())) safeTeleport(online, fallback.getSpawnLocation());
-                // Apply fresh-start immediately for affected players (pre-unload) to ensure visible reset
-                if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
-                    for (UUID id : affectedPlayers) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) applyFreshStartIfEnabled(p); }
+                if (fallback == null) {
+                    Messages.send(initiator, "&cFailed to find or create a fallback world; aborting.");
+                    resetInProgress.set(false);
+                    return;
                 }
 
-                Map<String, Path> worldFolders = resolveWorldFolders(worldNames);
-                if (!unloadWorldsReliably(worldNames, fallback, initiator)) { resetInProgress = false; phase = "IDLE"; return; }
+                preparePlayersForReset(affectedPlayers, worldNames, fallback.getSpawnLocation());
 
-                boolean backupsEnabled = plugin.getConfig().getBoolean("backups.enabled", true);
+                Map<String, Path> worldFolders = resolveWorldFolders(worldNames);
+                if (!unloadWorldsReliably(worldNames, fallback, initiator)) {
+                    resetInProgress.set(false);
+                    return;
+                }
+
+                boolean backupsEnabled = plugin.getConfig().getBoolean(ConfigKeys.BACKUPS_ENABLED, true);
                 Messages.send(initiator, backupsEnabled ? "&7Worlds unloaded. Archiving backups and recreating..." : "&7Worlds unloaded. Deleting old folders and recreating...");
 
                 plugin.getBackgroundExecutor().submit(() -> {
-                    try {
-                        if (backupsEnabled) backupManager.snapshot(worldBase, worldFolders);
-                        else {
-                            Path trashRoot = plugin.getDataFolder().toPath().resolve("trash").resolve(String.valueOf(System.currentTimeMillis()));
-                            Files.createDirectories(trashRoot);
-                            for (Map.Entry<String, Path> e : worldFolders.entrySet()) {
-                                Path path = e.getValue();
-                                if (path == null || !Files.exists(path)) continue;
-                                try { moveWithFallback(path, trashRoot.resolve(path.getFileName())); } catch (Exception ex) { try { deletePath(path); } catch (IOException ignored) {} }
-                            }
-                            plugin.getBackgroundExecutor().submit(() -> { try { deletePath(trashRoot); } catch (IOException ignored) {} });
-                        }
-                        Bukkit.getScheduler().runTask(plugin, () -> { swapPreloadedIfAny(worldBase, dims); recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers, dims); });
-                    } catch (Exception ex) {
-                        Bukkit.getScheduler().runTask(plugin, () -> { Messages.send(initiator, "&cUnexpected error while deleting worlds: " + ex.getMessage()); resetInProgress = false; phase = "IDLE"; auditLogger.log(plugin, "Reset failed for '" + worldBase + "' (exception during delete): " + ex.getMessage()); });
-                    }
+                    handleOldWorldFiles(initiator, worldBase, worldFolders, seedOpt, affectedPlayers, dims, backupsEnabled);
                 });
-            } catch (Exception ex) { Messages.send(initiator, "&cError during reset: " + ex.getMessage()); resetInProgress = false; phase = "IDLE"; auditLogger.log(plugin, "Reset failed for '" + worldBase + "' (exception): " + ex.getMessage()); }
+            } catch (Exception ex) {
+                Messages.send(initiator, "&cError during reset: " + ex.getMessage());
+                auditLogger.log(plugin, "Reset failed for '" + worldBase + "' (exception): " + ex.getMessage());
+                plugin.getLogger().log(Level.SEVERE, "Reset failed for '" + worldBase + "'", ex);
+                resetInProgress.set(false);
+                phase = "IDLE";
+            }
         });
     }
 
     private void recreateWorlds(CommandSender initiator, String base, Optional<Long> seedOpt, Set<UUID> previouslyAffected, EnumSet<Dimension> dims) {
-        try {
-            boolean sameSeedForAll = plugin.getConfig().getBoolean("seeds.useSameSeedForAllDimensions", true);
-            long baseSeed = seedOpt.orElseGet(() -> rng.nextLong());
+        try { // The lock is acquired in resetWorldAsync and must be released here.
+            boolean sameSeedForAll = plugin.getConfig().getBoolean(ConfigKeys.SEEDS_USE_SAME_SEED_FOR_ALL_DIMENSIONS, true);
+            long baseSeed = seedOpt.orElseGet(rng::nextLong);
             World overworld = null;
+
             if (dims.contains(Dimension.OVERWORLD)) {
-                overworld = new WorldCreator(base).seed(baseSeed).environment(World.Environment.NORMAL).type(WorldType.NORMAL).createWorld();
-                if (overworld == null) { Messages.send(initiator, "&cFailed to create overworld: " + base); resetInProgress = false; phase = "IDLE"; auditLogger.log(plugin, "Reset failed creating overworld for '" + base + "'"); return; }
-                try { overworld.getChunkAt(overworld.getSpawnLocation()).load(true); } catch (Exception ignored) {}
-                multiverseCompat.ensureRegistered(base, World.Environment.NORMAL, baseSeed);
+                overworld = createAndRegisterWorld(initiator, base, baseSeed, World.Environment.NORMAL);
+                if (overworld == null) return;
             }
 
             long netherSeed = sameSeedForAll ? baseSeed : rng.nextLong();
             if (dims.contains(Dimension.NETHER)) {
-                World nether = new WorldCreator(base + "_nether").seed(netherSeed).environment(World.Environment.NETHER).type(WorldType.NORMAL).createWorld();
-                if (nether == null) { Messages.send(initiator, "&cFailed to create nether: " + base + "_nether"); resetInProgress = false; phase = "IDLE"; auditLogger.log(plugin, "Reset failed creating nether for '" + base + "'"); return; }
-                try { nether.getChunkAt(nether.getSpawnLocation()).load(true); } catch (Exception ignored) {}
-                multiverseCompat.ensureRegistered(base + "_nether", World.Environment.NETHER, netherSeed);
+                if (createAndRegisterWorld(initiator, base + "_nether", netherSeed, World.Environment.NETHER) == null)
+                    return;
             }
 
             long endSeed = sameSeedForAll ? baseSeed : rng.nextLong();
             if (dims.contains(Dimension.END)) {
-                World theEnd = new WorldCreator(base + "_the_end").seed(endSeed).environment(World.Environment.THE_END).type(WorldType.NORMAL).createWorld();
-                if (theEnd == null) { Messages.send(initiator, "&cFailed to create the_end: " + base + "_the_end"); resetInProgress = false; phase = "IDLE"; auditLogger.log(plugin, "Reset failed creating the_end for '" + base + "'"); return; }
-                try { theEnd.getChunkAt(theEnd.getSpawnLocation()).load(true); } catch (Exception ignored) {}
-                multiverseCompat.ensureRegistered(base + "_the_end", World.Environment.THE_END, endSeed);
+                if (createAndRegisterWorld(initiator, base + "_the_end", endSeed, World.Environment.THE_END) == null)
+                    return;
             }
 
-            try { seedHistory.add(baseSeed); if (!sameSeedForAll) { seedHistory.add(netherSeed); seedHistory.add(endSeed); } } catch (Exception ignored) {}
+            try {
+                seedHistory.add(baseSeed);
+                if (!sameSeedForAll) {
+                    seedHistory.add(netherSeed);
+                    seedHistory.add(endSeed);
+                }
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING, "Failed to update seed history", e);
+            }
             Messages.send(initiator, "&aRecreated worlds for '&e" + base + "&a' successfully.");
 
-            boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
-            if (returnPlayers && overworld != null) {
-                Location spawn = overworld.getSpawnLocation();
-                // Set world spawn to ensure respawning works correctly
-                try {
-                    overworld.setSpawnLocation(spawn);
-                } catch (Exception ex) {
-                    plugin.getLogger().warning("Failed to set world spawn after reset: " + ex.getMessage());
+            finalizeReset(initiator, base, overworld, previouslyAffected);
+        } catch (Exception ex) {
+            Messages.send(initiator, "&cError recreating worlds: " + ex.getMessage());
+            auditLogger.log(plugin, "Reset failed (exception during create) for '" + base + "': " + ex.getMessage());
+            plugin.getLogger().log(Level.SEVERE, "Failed to recreate worlds for " + base, ex);
+        } finally {
+            resetInProgress.set(false);
+            phase = "IDLE";
+            currentTarget = null;
+        }
+    }
+
+    private void finalizeReset(CommandSender initiator, String base, World overworld, Set<UUID> previouslyAffected) {
+        boolean returnPlayers = plugin.getConfig().getBoolean(ConfigKeys.PLAYERS_RETURN_TO_NEW_SPAWN_AFTER_RESET, true);
+        if (returnPlayers && overworld != null) {
+            Location spawn = overworld.getSpawnLocation();
+            try {
+                overworld.setSpawnLocation(spawn);
+            } catch (Exception ex) {
+                plugin.getLogger().warning("Failed to set world spawn after reset: " + ex.getMessage());
+            }
+
+            for (UUID id : previouslyAffected) {
+                Player p = Bukkit.getPlayer(id);
+                if (p != null && p.isOnline()) {
+                    safeTeleport(p, spawn);
+                    try {
+                        p.setRespawnLocation(null);
+                    } catch (Exception ex) {
+                        plugin.getLogger().warning("Failed to clear bed spawn for player " + p.getName() + ": " + ex.getMessage());
+                    }
                 }
-                
-                for (UUID id : previouslyAffected) {
-                    Player p = Bukkit.getPlayer(id);
-                    if (p != null && p.isOnline()) {
-                        safeTeleport(p, spawn);
-                        // Clear bed spawn location so they use world spawn
+            }
+        }
+
+        if (plugin.getConfig().getBoolean(ConfigKeys.PLAYERS_FRESH_START_ON_RESET, true)) {
+            Set<UUID> alreadyReset = new HashSet<>();
+            for (UUID id : previouslyAffected) {
+                Player p = Bukkit.getPlayer(id);
+                if (p != null && p.isOnline()) {
+                    applyFreshStartIfEnabled(p);
+                    alreadyReset.add(id);
+                    try {
+                        showShortTitle(p, "Fresh start applied");
+                        p.sendActionBar(net.kyori.adventure.text.Component.text("Done"));
+                    } catch (Throwable t) {
+                        plugin.getLogger().log(Level.WARNING, "Failed to show title on fresh start", t);
+                    }
+                }
+            }
+            if (plugin.getConfig().getBoolean(ConfigKeys.PLAYERS_RESET_ALL_ONLINE_AFTER_RESET, true)) {
+                for (Player online : Bukkit.getOnlinePlayers()) {
+                    if (!alreadyReset.contains(online.getUniqueId())) {
+                        applyFreshStartIfEnabled(online);
                         try {
-                            p.setRespawnLocation(null);
-                        } catch (Exception ex) {
-                            plugin.getLogger().warning("Failed to clear bed spawn for player " + p.getName() + ": " + ex.getMessage());
+                            showShortTitle(online, "Fresh start applied");
+                            online.sendActionBar(net.kyori.adventure.text.Component.text("Done"));
+                        } catch (Throwable t) {
+                            plugin.getLogger().log(Level.WARNING, "Failed to show title on fresh start", t);
                         }
                     }
                 }
             }
+        }
 
-            // Apply fresh-start resets to players as configured
-            if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
-                Set<UUID> alreadyReset = new HashSet<>();
-                for (UUID id : previouslyAffected) {
-                    Player p = Bukkit.getPlayer(id);
-if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); alreadyReset.add(id); try { showShortTitle(p, "Fresh start applied"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} }
-                }
-                if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
-                    for (Player online : Bukkit.getOnlinePlayers()) {
-                        if (!alreadyReset.contains(online.getUniqueId())) {
-                            applyFreshStartIfEnabled(online);
-try { showShortTitle(online, "Fresh start applied"); online.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {}
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            if (online.equals(initiator)) continue;
+            if (online.hasPermission("betterreset.notify"))
+                Messages.send(online, "&a[BetterReset]&7 World '&e" + base + "&7' has been reset.");
+        }
+
+        totalResets++;
+        lastResetTimestamp.put(base, System.currentTimeMillis());
+        auditLogger.log(plugin, "Reset completed for '" + base + "'");
+        try {
+            plugin.getRespawnManager().markReset(base);
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Failed to mark reset for respawn manager", e);
+        }
+    }
+
+    private World createAndRegisterWorld(CommandSender initiator, String name, long seed, World.Environment environment) {
+        World world = new WorldCreator(name).seed(seed).environment(environment).type(WorldType.NORMAL).createWorld();
+        if (world == null) {
+            Messages.send(initiator, "&cFailed to create world: " + name);
+            auditLogger.log(plugin, "Reset failed creating world '" + name + "'");
+            return null;
+        }
+        try {
+            world.getChunkAt(world.getSpawnLocation()).load(true);
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Failed to load spawn chunk for " + world.getName(), e);
+        }
+        multiverseCompat.ensureRegistered(name, environment, seed);
+        return world;
+    }
+
+    private void handleOldWorldFiles(CommandSender initiator, String worldBase, Map<String, Path> worldFolders, Optional<Long> seedOpt, Set<UUID> affectedPlayers, EnumSet<Dimension> dims, boolean backupsEnabled) {
+        try {
+            if (backupsEnabled) {
+                backupManager.snapshot(worldBase, worldFolders);
+            } else {
+                Path trashRoot = plugin.getDataFolder().toPath().resolve("trash").resolve(String.valueOf(System.currentTimeMillis()));
+                Files.createDirectories(trashRoot);
+                for (Map.Entry<String, Path> e : worldFolders.entrySet()) {
+                    Path path = e.getValue();
+                    if (path == null || !Files.exists(path)) continue;
+                    try {
+                        FileUtils.moveDirectoryToDirectory(path.toFile(), trashRoot.toFile(), true);
+                    } catch (Exception ex) {
+                        plugin.getLogger().log(Level.SEVERE, "Failed to move world folder to trash", ex);
+                        try {
+                            FileUtils.deleteDirectory(path.toFile());
+                        } catch (IOException ioEx) {
+                            plugin.getLogger().log(Level.SEVERE, "Failed to delete world folder after move failed", ioEx);
                         }
                     }
                 }
+                plugin.getBackgroundExecutor().submit(() -> {
+                    try {
+                        FileUtils.deleteDirectory(trashRoot.toFile());
+                    } catch (IOException ioEx) {
+                        plugin.getLogger().log(Level.WARNING, "Failed to delete trash folder", ioEx);
+                    }
+                });
             }
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                swapPreloadedIfAny(worldBase, dims);
+                recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers, dims);
+            });
+        } catch (Exception ex) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                Messages.send(initiator, "&cUnexpected error while deleting worlds: " + ex.getMessage());
+                auditLogger.log(plugin, "Reset failed for '" + worldBase + "' (exception during delete): " + ex.getMessage());
+                plugin.getLogger().log(Level.SEVERE, "Reset failed for '" + worldBase + "'", ex);
+                resetInProgress.set(false);
+                phase = "IDLE";
+            });
+        }
+    }
 
-            Messages.send(initiator, "&aRecreated worlds for '&e" + base + "&a' successfully.");
-            for (Player online : Bukkit.getOnlinePlayers()) { if (online.equals(initiator)) continue; if (online.hasPermission("betterreset.notify")) Messages.send(online, "&a[BetterReset]&7 World '&e" + base + "&7' has been reset."); }
-
-            totalResets++; lastResetTimestamp.put(base, System.currentTimeMillis()); auditLogger.log(plugin, "Reset completed for '" + base + "'"); resetInProgress = false; phase = "IDLE";
-            try { plugin.getRespawnManager().markReset(base); } catch (Exception ignored) {}
-        } catch (Exception ex) { Messages.send(initiator, "&cError recreating worlds: " + ex.getMessage()); resetInProgress = false; phase = "IDLE"; auditLogger.log(plugin, "Reset failed (exception during create) for '" + base + "': " + ex.getMessage()); }
+    private void preparePlayersForReset(Set<UUID> affectedPlayers, List<String> worldNames, Location fallbackLocation) {
+        // Teleport affected players
+        for (UUID id : affectedPlayers) {
+            Player p = Bukkit.getPlayer(id);
+            if (p != null && p.isOnline()) {
+                safeTeleport(p, fallbackLocation);
+            }
+        }
+        // Teleport any other players in the worlds being reset
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            if (online.getWorld() != null && worldNames.contains(online.getWorld().getName())) {
+                safeTeleport(online, fallbackLocation);
+            }
+        }
+        // Apply fresh start to affected players
+        if (plugin.getConfig().getBoolean(ConfigKeys.PLAYERS_FRESH_START_ON_RESET, true)) {
+            for (UUID id : affectedPlayers) {
+                Player p = Bukkit.getPlayer(id);
+                if (p != null && p.isOnline()) {
+                    applyFreshStartIfEnabled(p);
+                }
+            }
+        }
     }
 
     private static List<String> dimensionNames(String base, EnumSet<Dimension> dims) {
@@ -273,14 +425,14 @@ try { showShortTitle(online, "Fresh start applied"); online.sendActionBar(net.ky
     }
 
     private World findOrCreateFallbackWorld(List<String> toAvoid) {
-        String configured = plugin.getConfig().getString("teleport.fallbackWorldName", "").trim();
+        String configured = plugin.getConfig().getString(ConfigKeys.TELEPORT_FALLBACK_WORLD_NAME, "").trim();
         if (!configured.isEmpty()) { World cw = Bukkit.getWorld(configured); if (cw != null && !toAvoid.contains(cw.getName())) return cw; }
         for (World w : Bukkit.getWorlds()) if (!toAvoid.contains(w.getName())) return w;
         String tmpName = "betterreset_safe_" + Instant.now().getEpochSecond();
         return new WorldCreator(tmpName).environment(World.Environment.NORMAL).type(WorldType.NORMAL).createWorld();
     }
 
-    public boolean cancelCountdown() { boolean canceled = countdownManager.cancel(); if (canceled) { resetInProgress = false; phase = "IDLE"; auditLogger.log(plugin, "Countdown canceled for '" + currentTarget + "'"); currentTarget = null; } return canceled; }
+    public boolean cancelCountdown() { boolean canceled = countdownManager.cancel(); if (canceled) { resetInProgress.set(false); phase = "IDLE"; auditLogger.log(plugin, "Countdown canceled for '" + currentTarget + "'"); currentTarget = null; } return canceled; }
 
     public String getStatusLine() { if ("IDLE".equals(phase)) return "IDLE"; if ("COUNTDOWN".equals(phase)) return "COUNTDOWN '" + currentTarget + "' (" + countdownManager.secondsLeft() + "/" + countdownManager.totalSeconds() + ")"; return "RUNNING '" + currentTarget + "'"; }
 
@@ -291,73 +443,99 @@ try { showShortTitle(online, "Fresh start applied"); online.sendActionBar(net.ky
     public Optional<Long> getLastResetTimestamp(String base) { return Optional.ofNullable(lastResetTimestamp.get(base)); }
 
     public void restoreBackupAsync(CommandSender initiator, String base, String timestamp) {
-        if (resetInProgress) { Messages.send(initiator, "&cA reset/restore is already in progress. Please wait."); return; }
-        resetInProgress = true; phase = "RUNNING"; currentTarget = base; List<String> worldNames = Arrays.asList(base, base + "_nether", base + "_the_end"); Set<UUID> affected = new HashSet<>(); for (Player p : Bukkit.getOnlinePlayers()) if (worldNames.contains(p.getWorld().getName())) affected.add(p.getUniqueId());
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            World fallback = findOrCreateFallbackWorld(worldNames); if (fallback == null) { Messages.send(initiator, "&cFailed to create fallback world; aborting restore."); resetInProgress = false; phase = "IDLE"; return; }
-            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, fallback.getSpawnLocation()); }
-            for (String name : worldNames) { World w = Bukkit.getWorld(name); if (w != null) { try { w.save(); } catch (Exception ignored) {} Bukkit.unloadWorld(w, true); } }
-            // Apply fresh-start immediately to affected players prior to restore
-            if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
-                for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) applyFreshStartIfEnabled(p); }
-            }
-            CompletableFuture.runAsync(() -> {
-                try {
-                    backupManager.restore(base, timestamp);
-                    Bukkit.getScheduler().runTask(plugin, () -> {
-                        for (String name : worldNames) { File f = new File(Bukkit.getWorldContainer(), name); if (f.exists()) { World.Environment env = name.endsWith("_nether") ? World.Environment.NETHER : name.endsWith("_the_end") ? World.Environment.THE_END : World.Environment.NORMAL; new WorldCreator(name).environment(env).type(WorldType.NORMAL).createWorld(); } }
-                        // Optionally return affected players and fresh-start
-                        boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
-                        World baseWorld = Bukkit.getWorld(base);
-                        if (returnPlayers && baseWorld != null) {
-                            Location spawn = baseWorld.getSpawnLocation();
-                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, spawn); }
-                        }
-                        if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
-                            Set<UUID> already = new HashSet<>();
-for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id); try { showShortTitle(p, "Fresh start applied"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} } }
-                            if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
-for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) { applyFreshStartIfEnabled(op); try { showShortTitle(op, "Fresh start applied"); op.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} }
-                            }
-                        }
-                        Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a'."); if (initiator instanceof Player ip) { World w = Bukkit.getWorld(base); if (w != null) safeTeleport(ip, w.getSpawnLocation()); } resetInProgress = false; phase = "IDLE";
-                    });
-                } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> { Messages.send(initiator, "&cRestore failed: " + ex.getMessage()); resetInProgress = false; phase = "IDLE"; }); }
-            });
-        });
+        restoreBackupAsync(initiator, base, timestamp, EnumSet.allOf(Dimension.class));
     }
 
     public void restoreBackupAsync(CommandSender initiator, String base, String timestamp, EnumSet<Dimension> dims) {
-        if (resetInProgress) { Messages.send(initiator, "&cA reset/restore is already in progress. Please wait."); return; }
-        resetInProgress = true; phase = "RUNNING"; currentTarget = base; List<String> worldNames = dimensionNames(base, dims); Set<UUID> affected = new HashSet<>(); for (Player p : Bukkit.getOnlinePlayers()) if (worldNames.contains(p.getWorld().getName())) affected.add(p.getUniqueId());
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            World fallback = findOrCreateFallbackWorld(worldNames); if (fallback == null) { Messages.send(initiator, "&cFailed to create fallback world; aborting restore."); resetInProgress = false; phase = "IDLE"; return; }
-            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, fallback.getSpawnLocation()); }
-            for (String name : worldNames) { World w = Bukkit.getWorld(name); if (w != null) { try { w.save(); } catch (Exception ignored) {} Bukkit.unloadWorld(w, true); } }
-            CompletableFuture.runAsync(() -> {
+        if (!resetInProgress.compareAndSet(false, true)) {
+            Messages.send(initiator, "&cA reset/restore is already in progress. Please wait.");
+            return;
+        }
+        try {
+            phase = "RUNNING";
+            currentTarget = base;
+            final List<String> worldNames = dimensionNames(base, dims);
+            final Set<UUID> affectedPlayers = new HashSet<>();
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                if (p.getWorld() != null && worldNames.contains(p.getWorld().getName())) {
+                    affectedPlayers.add(p.getUniqueId());
+                }
+            }
+
+            Bukkit.getScheduler().runTask(plugin, () -> {
                 try {
-                    backupManager.restore(base, timestamp, dims);
-                    Bukkit.getScheduler().runTask(plugin, () -> {
-                        for (String name : worldNames) { File f = new File(Bukkit.getWorldContainer(), name); if (f.exists()) { World.Environment env = name.endsWith("_nether") ? World.Environment.NETHER : name.endsWith("_the_end") ? World.Environment.THE_END : World.Environment.NORMAL; new WorldCreator(name).environment(env).type(WorldType.NORMAL).createWorld(); } }
-                        // Optionally return affected players and fresh-start
-                        boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
-                        World baseWorld = Bukkit.getWorld(base);
-                        if (returnPlayers && baseWorld != null) {
-                            Location spawn = baseWorld.getSpawnLocation();
-                            for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) safeTeleport(p, spawn); }
+                    World fallback = findOrCreateFallbackWorld(worldNames);
+                    if (fallback == null) {
+                        Messages.send(initiator, "&cFailed to create fallback world; aborting restore.");
+                        resetInProgress.set(false);
+                        phase = "IDLE";
+                        return;
+                    }
+                    preparePlayersForReset(affectedPlayers, worldNames, fallback.getSpawnLocation());
+                    if (!unloadWorldsReliably(worldNames, fallback, initiator)) {
+                        resetInProgress.set(false);
+                        phase = "IDLE";
+                        return;
+                    }
+
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            backupManager.restore(base, timestamp, dims);
+
+                            Bukkit.getScheduler().runTask(plugin, () -> {
+                                try {
+                                    World overworld = null;
+                                    for (String name : worldNames) {
+                                        File f = new File(Bukkit.getWorldContainer(), name);
+                                        if (f.exists()) {
+                                            World.Environment env = name.endsWith("_nether") ? World.Environment.NETHER : name.endsWith("_the_end") ? World.Environment.THE_END : World.Environment.NORMAL;
+                                            World w = createAndRegisterWorld(initiator, name, 0, env);
+                                            if (name.equals(base)) {
+                                                overworld = w;
+                                            }
+                                        }
+                                    }
+                                    Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a' for " + dims + ".");
+                                    finalizeReset(initiator, base, overworld, affectedPlayers);
+
+                                    if (initiator instanceof Player ip) {
+                                        World w = Bukkit.getWorld(base);
+                                        if (w != null) safeTeleport(ip, w.getSpawnLocation());
+                                    }
+                                } catch (Exception ex) {
+                                    Messages.send(initiator, "&cRestore failed during finalization: " + ex.getMessage());
+                                    plugin.getLogger().log(Level.SEVERE, "Restore finalization failed for " + base, ex);
+                                } finally {
+                                    resetInProgress.set(false);
+                                    phase = "IDLE";
+                                    currentTarget = null;
+                                }
+                            });
+                        } catch (Exception ex) {
+                            Bukkit.getScheduler().runTask(plugin, () -> {
+                                Messages.send(initiator, "&cRestore failed during file operations: " + ex.getMessage());
+                                plugin.getLogger().log(Level.SEVERE, "Restore failed for " + base, ex);
+                                resetInProgress.set(false);
+                                phase = "IDLE";
+                                currentTarget = null;
+                            });
                         }
-                        if (plugin.getConfig().getBoolean("players.freshStartOnReset", true)) {
-                            Set<UUID> already = new HashSet<>();
-for (UUID id : affected) { Player p = Bukkit.getPlayer(id); if (p != null && p.isOnline()) { applyFreshStartIfEnabled(p); already.add(id); try { showShortTitle(p, "Fresh start applied"); p.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} } }
-                            if (plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true)) {
-for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId())) { applyFreshStartIfEnabled(op); try { showShortTitle(op, "Fresh start applied"); op.sendActionBar(net.kyori.adventure.text.Component.text("Done")); } catch (Throwable ignored) {} }
-                            }
-                        }
-                        Messages.send(initiator, "&aRestored backup '&e" + base + " @ " + timestamp + "&a' for " + dims + "."); if (initiator instanceof Player ip) { World w = Bukkit.getWorld(base); if (w != null) safeTeleport(ip, w.getSpawnLocation()); } resetInProgress = false; phase = "IDLE";
-                    });
-                } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> { Messages.send(initiator, "&cRestore failed: " + ex.getMessage()); resetInProgress = false; phase = "IDLE"; }); }
+                    }, plugin.getBackgroundExecutor());
+                } catch (Exception ex) {
+                    Messages.send(initiator, "&cRestore failed during preparation: " + ex.getMessage());
+                    plugin.getLogger().log(Level.SEVERE, "Restore preparation failed for " + base, ex);
+                    resetInProgress.set(false);
+                    phase = "IDLE";
+                    currentTarget = null;
+                }
             });
-        });
+        } catch (Exception ex) {
+            Messages.send(initiator, "&cFailed to start restore: " + ex.getMessage());
+            plugin.getLogger().log(Level.SEVERE, "Failed to start restore for " + base, ex);
+            resetInProgress.set(false);
+            phase = "IDLE";
+            currentTarget = null;
+        }
     }
 
     public void deleteBackupAsync(CommandSender initiator, String base, String timestamp) {
@@ -366,7 +544,7 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
 
     public void pruneBackupsAsync(CommandSender initiator, Optional<String> baseOpt) { Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> { try { if (baseOpt.isPresent()) backupManager.prune(baseOpt.get()); else backupManager.pruneAll(); Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aPrune complete.")); } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cPrune failed: " + ex.getMessage())); } }); }
 
-    public void pruneBackupsAsync(CommandSender initiator, Optional<String> baseOpt, boolean forceKeepPolicy) { if (!forceKeepPolicy) { pruneBackupsAsync(initiator, baseOpt); return; } Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> { try { int keep = plugin.getConfig().getInt("backups.pruneNowKeepPerBase", 2); if (baseOpt.isPresent()) backupManager.pruneKeepPerBase(baseOpt.get(), keep); else backupManager.pruneKeepAllBases(keep); Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aPrune complete. Kept at most " + keep + " per base.")); } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cPrune failed: " + ex.getMessage())); } }); }
+    public void pruneBackupsAsync(CommandSender initiator, Optional<String> baseOpt, boolean forceKeepPolicy) { if (!forceKeepPolicy) { pruneBackupsAsync(initiator, baseOpt); return; } Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> { try { int keep = plugin.getConfig().getInt(ConfigKeys.BACKUPS_PRUNE_NOW_KEEP_PER_BASE, 2); if (baseOpt.isPresent()) backupManager.pruneKeepPerBase(baseOpt.get(), keep); else backupManager.pruneKeepAllBases(keep); Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aPrune complete. Kept at most " + keep + " per base.")); } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cPrune failed: " + ex.getMessage())); } }); }
 
     public void deleteAllBackupsForBaseAsync(CommandSender initiator, String base) { Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> { try { backupManager.deleteAllForBase(base); Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aDeleted all backups for '&e" + base + "&a'.")); } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cDelete all failed: " + ex.getMessage())); } }); }
 
@@ -376,7 +554,7 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
 
     public void testResetAsync(CommandSender initiator, String base, Optional<Long> seedOpt, EnumSet<Dimension> dims, boolean dryRun) {
         String testBase = ("brtest_" + base + "_" + System.currentTimeMillis());
-        long seed = seedOpt.orElseGet(() -> rng.nextLong());
+        long seed = seedOpt.orElseGet(rng::nextLong);
         Messages.send(initiator, "&7Starting test reset for '&e" + base + "&7' → temp '&e" + testBase + "&7'.");
         long t0 = System.nanoTime();
         Bukkit.getScheduler().runTask(plugin, () -> {
@@ -393,10 +571,16 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
                 else {
                     CompletableFuture.runAsync(() -> {
                         try {
-                            for (String name : dimensionNames(testBase, dims)) { File f = new File(Bukkit.getWorldContainer(), name); if (f.exists()) deletePath(f.toPath()); }
-                            long tEnd = System.nanoTime(); Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aCleanup complete. Total test time: &e" + ((tEnd - t0)/1_000_000) + "ms"));
-                        } catch (Exception ex) { Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cTest cleanup failed: " + ex.getMessage())); }
-                    });
+                            for (String name : dimensionNames(testBase, dims)) {
+                                File f = new File(Bukkit.getWorldContainer(), name);
+                                if (f.exists()) FileUtils.deleteDirectory(f);
+                            }
+                            long tEnd = System.nanoTime();
+                            Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&aCleanup complete. Total test time: &e" + ((tEnd - t0)/1_000_000) + "ms"));
+                        } catch (Exception ex) {
+                            Bukkit.getScheduler().runTask(plugin, () -> Messages.send(initiator, "&cTest cleanup failed: " + ex.getMessage()));
+                        }
+                    }, plugin.getBackgroundExecutor());
                 }
             } catch (Exception ex) { Messages.send(initiator, "&cTest reset failed: " + ex.getMessage()); }
         });
@@ -417,7 +601,7 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
     }
 
     private void applyFreshStartIfEnabled(Player p) {
-        if (!plugin.getConfig().getBoolean("players.freshStartOnReset", true)) return;
+        if (!plugin.getConfig().getBoolean(ConfigKeys.PLAYERS_FRESH_START_ON_RESET, true)) return;
         try {
             // Clear inventory and ender chest
             p.getInventory().clear();
@@ -460,13 +644,6 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
         }
     }
 
-    private void deletePath(Path path) throws IOException {
-        if (!Files.exists(path)) return;
-        Files.walkFileTree(path, new SimpleFileVisitor<>() {
-            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException { Files.deleteIfExists(file); return FileVisitResult.CONTINUE; }
-            @Override public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException { Files.deleteIfExists(dir); return FileVisitResult.CONTINUE; }
-        });
-    }
 
     private boolean unloadWorldsReliably(List<String> worldNames, World fallback, CommandSender initiator) {
         List<String> remaining = new ArrayList<>();
@@ -488,20 +665,32 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
 
     private void swapPreloadedIfAny(String base, EnumSet<Dimension> dims) {
         for (String target : dimensionNames(base, dims)) {
-            String prep = "brprep_" + target; World prepWorld = Bukkit.getWorld(prep); if (prepWorld != null) Bukkit.unloadWorld(prepWorld, true);
-            File container = Bukkit.getWorldContainer(); File prepFolder = new File(container, prep); File targetFolder = new File(container, target);
+            String prep = "brprep_" + target;
+            World prepWorld = Bukkit.getWorld(prep);
+            if (prepWorld != null) {
+                Bukkit.unloadWorld(prepWorld, true);
+            }
+            File container = Bukkit.getWorldContainer();
+            File prepFolder = new File(container, prep);
+            File targetFolder = new File(container, target);
             if (prepFolder.exists()) {
-                if (targetFolder.exists()) { try { deletePath(targetFolder.toPath()); } catch (Exception ignored) {} }
-                try { moveWithFallback(prepFolder.toPath(), targetFolder.toPath()); } catch (Exception ignored) {}
+                try {
+                    if (targetFolder.exists()) {
+                        FileUtils.deleteDirectory(targetFolder);
+                    }
+                    FileUtils.moveDirectory(prepFolder, targetFolder);
+                } catch (IOException e) {
+                    plugin.getLogger().log(Level.SEVERE, "Failed to swap preloaded world " + prep, e);
+                }
             }
         }
     }
 
     private void maybePreload(String baseWorld, long seed, EnumSet<Dimension> dims) {
         try {
-            if (!plugin.getConfig().getBoolean("preload.enabled", true)) return;
-            if (plugin.getConfig().getBoolean("preload.autoDisableHighLag", true)) {
-                try { double[] tps = (double[]) Bukkit.getServer().getClass().getMethod("getTPS").invoke(Bukkit.getServer()); double minTps = plugin.getConfig().getDouble("preload.tpsThreshold", 18.0); if (tps != null && tps.length > 0 && tps[0] < minTps) return; } catch (Throwable ignored) {}
+            if (!plugin.getConfig().getBoolean(ConfigKeys.PRELOAD_ENABLED, true)) return;
+            if (plugin.getConfig().getBoolean(ConfigKeys.PRELOAD_AUTO_DISABLE_HIGH_LAG, true)) {
+                try { double[] tps = (double[]) Bukkit.getServer().getClass().getMethod("getTPS").invoke(Bukkit.getServer()); double minTps = plugin.getConfig().getDouble(ConfigKeys.PRELOAD_TPS_THRESHOLD, 18.0); if (tps != null && tps.length > 0 && tps[0] < minTps) return; } catch (Throwable ignored) {}
             }
             EnumSet<PreloadManager.Dimension> pdims = EnumSet.noneOf(PreloadManager.Dimension.class);
             if (dims.contains(Dimension.OVERWORLD)) pdims.add(PreloadManager.Dimension.OVERWORLD);
@@ -511,32 +700,14 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
         } catch (Throwable ignored) {}
     }
 
-    private void moveWithFallback(Path src, Path dst) throws IOException, InterruptedException {
-        int attempts = 3;
-        for (int i = 0; i < attempts; i++) {
-            try { Files.createDirectories(dst.getParent()); Files.move(src, dst, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); return; }
-            catch (AtomicMoveNotSupportedException amnse) { try { Files.move(src, dst, StandardCopyOption.REPLACE_EXISTING); return; } catch (Exception ignored) {} }
-            catch (IOException ex) { try { Thread.sleep(50); } catch (InterruptedException ignored) {} }
-        }
-        try { src.toFile().renameTo(dst.toFile()); if (!Files.exists(dst)) throw new IOException("renameTo failed"); return; } catch (Exception ignored) {}
-        copyAndDelete(src, dst);
-    }
-
-    private void copyAndDelete(Path src, Path dst) throws IOException {
-        Files.walkFileTree(src, new SimpleFileVisitor<>() {
-            @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException { Path rel = src.relativize(dir); Path target = dst.resolve(rel); Files.createDirectories(target); return FileVisitResult.CONTINUE; }
-            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException { Path rel = src.relativize(file); Files.copy(file, dst.resolve(rel), StandardCopyOption.REPLACE_EXISTING); return FileVisitResult.CONTINUE; }
-        });
-        deletePath(src);
-    }
 
     // --- Teleport Mode (soft reset of overworld) ---
     public void startTeleportWithCountdown(Player player, String baseWorld, Optional<Long> seedOpt, EnumSet<Dimension> dimensions) {
-        if (resetInProgress) { Messages.send(player, "&cA reset is already in progress. Please wait."); return; }
+        if (resetInProgress.get()) { Messages.send(player, "&cA reset is already in progress. Please wait."); return; }
         
         // Ensure nether and end are included by default for teleport mode
         EnumSet<Dimension> dims = EnumSet.copyOf(dimensions);
-        boolean resetNetherEnd = plugin.getConfig().getBoolean("teleportMode.resetNetherEnd", true);
+        boolean resetNetherEnd = plugin.getConfig().getBoolean(ConfigKeys.TELEPORT_MODE_RESET_NETHER_END, true);
         if (resetNetherEnd) {
             dims.add(Dimension.NETHER);
             dims.add(Dimension.END);
@@ -547,7 +718,7 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
         Optional<Long> effectiveSeed = seedOpt.isPresent() ? seedOpt : Optional.of(rng.nextLong());
         ResetTask task = new ResetTask(baseWorld, dims, player, effectiveSeed.orElse(null), affectedWorlds);
         activeTasks.put(player.getUniqueId(), task);
-        int seconds = plugin.getConfig().getInt("countdown.seconds", 10);
+        int seconds = plugin.getConfig().getInt(ConfigKeys.COUNTDOWN_SECONDS, 10);
         Messages.send(player, "&eStarting teleport-mode countdown for &6" + baseWorld + "&e...");
         countdownManager.startCountdown(task.getInitiator(), task.getAffectedWorlds(), seconds, () -> {
             if (!task.isCancelled()) {
@@ -573,9 +744,9 @@ for (Player op : Bukkit.getOnlinePlayers()) if (!already.contains(op.getUniqueId
         if (overworld == null) { Messages.send(initiator, "&cBase world not found: &e" + baseWorld); return; }
         
         // Use same distance for everyone (15000 blocks by default)
-        int teleportDistance = plugin.getConfig().getInt("teleportMode.playerDistance", 15000);
-        boolean fresh = plugin.getConfig().getBoolean("players.freshStartOnReset", true);
-        boolean setWorldSpawn = plugin.getConfig().getBoolean("teleportMode.setWorldSpawn", true);
+        int teleportDistance = plugin.getConfig().getInt(ConfigKeys.TELEPORT_MODE_PLAYER_DISTANCE, 15000);
+        boolean fresh = plugin.getConfig().getBoolean(ConfigKeys.PLAYERS_FRESH_START_ON_RESET, true);
+        boolean setWorldSpawn = plugin.getConfig().getBoolean(ConfigKeys.TELEPORT_MODE_SET_WORLD_SPAWN, true);
         
         // Find ONE safe location that everyone will teleport to
         java.util.Random r = new java.util.Random();
