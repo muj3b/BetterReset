@@ -6,6 +6,7 @@ import com.muj3b.betterreset.command.LegacyFullResetCommand;
 import com.muj3b.betterreset.core.ConfirmationManager;
 import com.muj3b.betterreset.core.ResetService;
 import com.muj3b.betterreset.ui.SimpleGuiManager;
+import com.muj3b.betterreset.util.ConfigKeys;
 import com.muj3b.betterreset.util.CountdownManager;
 import com.muj3b.betterreset.util.MultiverseCompat;
 import com.muj3b.betterreset.util.PlaytimeTracker;
@@ -43,7 +44,7 @@ public final class FullResetPlugin extends JavaPlugin {
         this.multiverseCompat = new MultiverseCompat(this);
         this.preloadManager = new PreloadManager(this);
 
-        int historySize = Math.max(1, getConfig().getInt("seeds.historyCapacity", 10));
+        int historySize = Math.max(1, getConfig().getInt(ConfigKeys.SEEDS_HISTORY_CAPACITY, 10));
         this.seedHistory = new SeedHistory(historySize);
 
         this.resetService = new ResetService(this, confirmationManager, countdownManager, multiverseCompat, preloadManager);
@@ -51,7 +52,7 @@ public final class FullResetPlugin extends JavaPlugin {
         this.respawnManager = new RespawnManager(this);
         this.playtimeTracker = new PlaytimeTracker(this);
 
-        int parallel = Math.max(1, getConfig().getInt("deletion.parallelism", 2));
+        int parallel = Math.max(1, getConfig().getInt(ConfigKeys.DELETION_PARALLELISM, 2));
         ThreadFactory tf = r -> {
             Thread t = new Thread(r, "betterreset-bg");
             t.setDaemon(true);
