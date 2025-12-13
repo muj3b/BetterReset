@@ -79,6 +79,8 @@ seeds:
 
 players:
   returnToNewSpawnAfterReset: true
+  freshStartOnReset: true
+  resetOfflinePlayers: true  # Also reset offline players' data (inventory, XP, etc.)
 
 countdown:
   seconds: 10

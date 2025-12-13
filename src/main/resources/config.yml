@@ -19,6 +19,9 @@ players:
   freshStartOnReset: true
   # If true, apply freshStart to ALL online players (not just those in affected worlds)
   resetAllOnlineAfterReset: true
+  # If true, also reset offline players' data (inventory, XP, etc.) when world resets
+  # This deletes offline player .dat files so they start fresh when rejoining
+  resetOfflinePlayers: true
   
 # General limits and safety gates
 limits:
