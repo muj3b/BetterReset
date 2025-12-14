@@ -889,8 +889,29 @@ public class ResetService {
 
             // Reset health and status effects
             p.setFireTicks(0);
-            var attr = p.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH);
-            double maxHealth = (attr != null) ? attr.getValue() : 20.0;
+            double maxHealth = 20.0;
+            try {
+                // Try new attribute name first (1.21.3+): MAX_HEALTH
+                org.bukkit.attribute.Attribute maxHealthAttr = null;
+                try {
+                    maxHealthAttr = org.bukkit.attribute.Attribute.valueOf("MAX_HEALTH");
+                } catch (IllegalArgumentException e1) {
+                    // Fall back to old name (pre-1.21.3): GENERIC_MAX_HEALTH
+                    try {
+                        maxHealthAttr = org.bukkit.attribute.Attribute.valueOf("GENERIC_MAX_HEALTH");
+                    } catch (IllegalArgumentException e2) {
+                        // Neither exists, use default
+                    }
+                }
+                if (maxHealthAttr != null) {
+                    var attr = p.getAttribute(maxHealthAttr);
+                    if (attr != null) {
+                        maxHealth = attr.getValue();
+                    }
+                }
+            } catch (Exception e) {
+                // Fall back to default max health
+            }
             p.setHealth(Math.min(maxHealth, 20.0));
 
             // Reset hunger and saturation
