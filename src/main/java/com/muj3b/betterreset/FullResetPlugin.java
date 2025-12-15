@@ -46,7 +46,8 @@ public final class FullResetPlugin extends JavaPlugin {
         int historySize = Math.max(1, getConfig().getInt("seeds.historyCapacity", 10));
         this.seedHistory = new SeedHistory(historySize);
 
-        this.resetService = new ResetService(this, confirmationManager, countdownManager, multiverseCompat, preloadManager);
+        this.resetService = new ResetService(this, confirmationManager, countdownManager, multiverseCompat,
+                preloadManager);
         this.guiManager = new SimpleGuiManager(this, resetService);
         this.respawnManager = new RespawnManager(this);
         this.playtimeTracker = new PlaytimeTracker(this);
@@ -70,7 +71,8 @@ public final class FullResetPlugin extends JavaPlugin {
 
         // Legacy alias
         if (getCommand("fullreset") != null) {
-            getCommand("fullreset").setExecutor(new LegacyFullResetCommand(this, new FullResetCommand(this, resetService, confirmationManager)));
+            getCommand("fullreset").setExecutor(
+                    new LegacyFullResetCommand(this, new FullResetCommand(this, resetService, confirmationManager)));
         }
 
         getLogger().info("BetterReset enabled.");
@@ -78,15 +80,39 @@ public final class FullResetPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // Save respawn data for persistence across restarts
+        if (respawnManager != null) {
+            try {
+                respawnManager.shutdown();
+            } catch (Exception ignored) {
+            }
+        }
         if (backgroundExecutor != null) {
-            try { backgroundExecutor.shutdownNow(); } catch (Exception ignored) {}
+            try {
+                backgroundExecutor.shutdownNow();
+            } catch (Exception ignored) {
+            }
         }
         getLogger().info("BetterReset disabled.");
     }
 
-    public ExecutorService getBackgroundExecutor() { return backgroundExecutor; }
-    public SeedHistory getSeedHistory() { return seedHistory; }
-    public PlaytimeTracker getPlaytimeTracker() { return playtimeTracker; }
-    public RespawnManager getRespawnManager() { return respawnManager; }
-    public ResetService getResetService() { return resetService; }
+    public ExecutorService getBackgroundExecutor() {
+        return backgroundExecutor;
+    }
+
+    public SeedHistory getSeedHistory() {
+        return seedHistory;
+    }
+
+    public PlaytimeTracker getPlaytimeTracker() {
+        return playtimeTracker;
+    }
+
+    public RespawnManager getRespawnManager() {
+        return respawnManager;
+    }
+
+    public ResetService getResetService() {
+        return resetService;
+    }
 }
