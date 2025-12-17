@@ -219,6 +219,14 @@ public class ResetService {
                     worldFolders.remove(failedWorld);
                 }
 
+                // Mark reset for RespawnManager protection even for fallback-reset worlds
+                if (!failedToUnload.isEmpty()) {
+                    try {
+                        plugin.getRespawnManager().markReset(worldBase);
+                    } catch (Exception ignored) {
+                    }
+                }
+
                 boolean backupsEnabled = plugin.getConfig().getBoolean("backups.enabled", true);
 
                 // Only process worlds that were successfully unloaded
