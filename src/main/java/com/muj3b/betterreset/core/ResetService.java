@@ -208,25 +208,47 @@ public class ResetService {
                 }
 
                 Map<String, Path> worldFolders = resolveWorldFolders(worldNames);
-                if (!unloadWorldsReliably(worldNames, fallback, initiator)) {
+                Set<String> failedToUnload = unloadWorldsReliably(worldNames, fallback, initiator);
+
+                // For worlds that couldn't be unloaded (like the default world), use fallback
+                // reset
+                final long seedForFallback = seedOpt.orElse(System.currentTimeMillis());
+                for (String failedWorld : failedToUnload) {
+                    forceResetLoadedWorld(failedWorld, seedForFallback, initiator);
+                    // Remove from worldFolders since it's already handled
+                    worldFolders.remove(failedWorld);
+                }
+
+                boolean backupsEnabled = plugin.getConfig().getBoolean("backups.enabled", true);
+
+                // Only process worlds that were successfully unloaded
+                final Map<String, Path> unloadedWorldFolders = new HashMap<>();
+                for (String name : worldNames) {
+                    if (!failedToUnload.contains(name) && worldFolders.containsKey(name)) {
+                        unloadedWorldFolders.put(name, worldFolders.get(name));
+                    }
+                }
+
+                if (unloadedWorldFolders.isEmpty() && failedToUnload.isEmpty()) {
+                    Messages.send(initiator, "§7No worlds needed processing.");
                     resetInProgress = false;
                     phase = "IDLE";
                     return;
                 }
 
-                boolean backupsEnabled = plugin.getConfig().getBoolean("backups.enabled", true);
-                Messages.send(initiator, backupsEnabled ? "&7Worlds unloaded. Archiving backups and recreating..."
-                        : "&7Worlds unloaded. Deleting old folders and recreating...");
+                Messages.send(initiator, backupsEnabled ? "§7Worlds processed. Archiving backups and recreating..."
+                        : "§7Worlds processed. Deleting old folders and recreating...");
 
+                final Set<String> finalFailedToUnload = failedToUnload;
                 plugin.getBackgroundExecutor().submit(() -> {
                     try {
-                        if (backupsEnabled)
-                            backupManager.snapshot(worldBase, worldFolders);
-                        else {
+                        if (backupsEnabled && !unloadedWorldFolders.isEmpty())
+                            backupManager.snapshot(worldBase, unloadedWorldFolders);
+                        else if (!unloadedWorldFolders.isEmpty()) {
                             Path trashRoot = plugin.getDataFolder().toPath().resolve("trash")
                                     .resolve(String.valueOf(System.currentTimeMillis()));
                             Files.createDirectories(trashRoot);
-                            for (Map.Entry<String, Path> e : worldFolders.entrySet()) {
+                            for (Map.Entry<String, Path> e : unloadedWorldFolders.entrySet()) {
                                 Path path = e.getValue();
                                 if (path == null || !Files.exists(path))
                                     continue;
@@ -247,8 +269,23 @@ public class ResetService {
                             });
                         }
                         Bukkit.getScheduler().runTask(plugin, () -> {
-                            swapPreloadedIfAny(worldBase, dims);
-                            recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers, dims);
+                            // Only swap preloaded for worlds that were unloaded, skip fallback-reset ones
+                            EnumSet<Dimension> dimsToSwap = EnumSet.noneOf(Dimension.class);
+                            for (Dimension dim : dims) {
+                                String dimWorldName = switch (dim) {
+                                    case OVERWORLD -> worldBase;
+                                    case NETHER -> worldBase + "_nether";
+                                    case END -> worldBase + "_the_end";
+                                };
+                                if (!finalFailedToUnload.contains(dimWorldName)) {
+                                    dimsToSwap.add(dim);
+                                }
+                            }
+                            if (!dimsToSwap.isEmpty()) {
+                                swapPreloadedIfAny(worldBase, dimsToSwap);
+                            }
+                            // Recreate only the worlds that weren't force-reset
+                            recreateWorlds(initiator, worldBase, seedOpt, affectedPlayers, dimsToSwap);
                         });
                     } catch (Exception ex) {
                         Bukkit.getScheduler().runTask(plugin, () -> {
@@ -964,8 +1001,15 @@ public class ResetService {
         });
     }
 
-    private boolean unloadWorldsReliably(List<String> worldNames, World fallback, CommandSender initiator) {
+    /**
+     * Attempt to unload worlds. Returns set of world names that failed to unload.
+     * For worlds that fail (like the default world), the caller should use
+     * forceResetLoadedWorld.
+     */
+    private Set<String> unloadWorldsReliably(List<String> worldNames, World fallback, CommandSender initiator) {
+        Set<String> failed = new HashSet<>();
         List<String> remaining = new ArrayList<>();
+
         for (String name : worldNames) {
             World w = Bukkit.getWorld(name);
             if (w == null)
@@ -979,8 +1023,10 @@ public class ResetService {
             if (!Bukkit.unloadWorld(w, true))
                 remaining.add(name);
         }
+
         if (remaining.isEmpty())
-            return true;
+            return failed;
+
         final int max = 5;
         for (int attempt = 1; attempt <= max && !remaining.isEmpty(); attempt++) {
             try {
@@ -1005,9 +1051,87 @@ public class ResetService {
                     it.remove();
             }
         }
-        if (!remaining.isEmpty())
-            Messages.send(initiator, "&cFailed to unload: &e" + String.join(", ", remaining));
-        return remaining.isEmpty();
+
+        // Any remaining worlds couldn't be unloaded - add them to failed set
+        for (String name : remaining) {
+            failed.add(name);
+            plugin.getLogger().warning(
+                    "Could not unload world '" + name + "' (likely the default world). Using fallback reset strategy.");
+        }
+
+        return failed;
+    }
+
+    /**
+     * Force reset a world that couldn't be unloaded (like the default world).
+     * This unloads all chunks, deletes region files, and triggers regeneration.
+     */
+    private void forceResetLoadedWorld(String worldName, long newSeed, CommandSender initiator) {
+        World world = Bukkit.getWorld(worldName);
+        if (world == null) {
+            plugin.getLogger().warning("forceResetLoadedWorld: World '" + worldName + "' not found");
+            return;
+        }
+
+        plugin.getLogger().info("Force-resetting loaded world: " + worldName);
+        Messages.send(initiator, "§e[BetterReset] Using fallback reset for '" + worldName + "' (default world)...");
+
+        // Step 1: Force unload all chunks
+        int unloadedChunks = 0;
+        for (org.bukkit.Chunk chunk : world.getLoadedChunks()) {
+            try {
+                chunk.unload(true);
+                unloadedChunks++;
+            } catch (Exception ignored) {
+            }
+        }
+        plugin.getLogger().info("Unloaded " + unloadedChunks + " chunks from " + worldName);
+
+        // Step 2: Delete region files (the world folder's region, entities, poi
+        // subdirectories)
+        File worldFolder = world.getWorldFolder();
+        String[] dataDirs = { "region", "entities", "poi", "DIM-1", "DIM1", "playerdata", "advancements", "stats",
+                "datapacks" };
+
+        for (String dir : dataDirs) {
+            File dataDir = new File(worldFolder, dir);
+            if (dataDir.exists() && dataDir.isDirectory()) {
+                try {
+                    org.apache.commons.io.FileUtils.deleteDirectory(dataDir);
+                    plugin.getLogger().info("Deleted " + dir + " folder for " + worldName);
+                } catch (Exception e) {
+                    plugin.getLogger().warning("Failed to delete " + dir + " for " + worldName + ": " + e.getMessage());
+                }
+            }
+        }
+
+        // Also delete level.dat to reset seed and spawn
+        File levelDat = new File(worldFolder, "level.dat");
+        File levelDatOld = new File(worldFolder, "level.dat_old");
+        try {
+            if (levelDat.exists())
+                levelDat.delete();
+            if (levelDatOld.exists())
+                levelDatOld.delete();
+        } catch (Exception e) {
+            plugin.getLogger().warning("Failed to delete level.dat for " + worldName + ": " + e.getMessage());
+        }
+
+        // Step 3: The world will regenerate with fresh chunks when players enter
+        // Set spawn to 0,0 initially - it will be recalculated
+        try {
+            Location newSpawn = new Location(world, 0, 64, 0);
+            // Find safe spawn Y
+            int highY = world.getHighestBlockYAt(0, 0);
+            if (highY > 0) {
+                newSpawn.setY(highY + 1);
+            }
+            world.setSpawnLocation(newSpawn);
+        } catch (Exception e) {
+            plugin.getLogger().warning("Failed to set spawn for " + worldName + ": " + e.getMessage());
+        }
+
+        plugin.getLogger().info("Force reset completed for " + worldName + ". Chunks will regenerate on demand.");
     }
 
     private void swapPreloadedIfAny(String base, EnumSet<Dimension> dims) {

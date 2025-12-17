@@ -6,7 +6,7 @@
 
     <groupId>com.github.codex</groupId>
     <artifactId>betterreset</artifactId>
-<version>1.2.4</version>
+<version>1.2.5</version>
     <name>BetterReset</name>
     <description>Reset a world's overworld, nether, and end live with one command.</description>
 
