@@ -37,7 +37,7 @@ Requirements: PaperMC or Spigot 1.21+ and Java 17+.
 
 ## 🕹️ Commands
 
-Root: `/betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about>`
+Root: `/betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about|trimchunks>`
 
 | Command | Description | Permission | Default |
 |:--|:--|:--|:--|
@@ -51,6 +51,7 @@ Root: `/betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsam
 | `/betterreset seedsame &lt;true\|false&gt;` | Toggle same-seed policy | `betterreset.seedsame` | OP |
 | `/betterreset listworlds` | List loaded base worlds | `betterreset.listworlds` | Everyone |
 | `/betterreset about` | Show plugin version/author | `betterreset.about` | Everyone |
+| `/betterreset trimchunks <base> [--overworld] [--nether] [--end] [--all]` | Run chunk reset rules (inactive + End distance) | `betterreset.trim` | OP |
 
 Examples:
 
@@ -97,6 +98,16 @@ messages:
   noPermission: "&cYou don't have permission to use this command."
   countdownTitle: "&cReset in %s..."
   countdownSubtitle: "&7plugin made by muj3b"
+
+chunkReset:
+  enabled: true
+  backupBeforeTrim: true
+  inactive:
+    enabled: true
+    days: 30
+  endDistance:
+    enabled: true
+    minDistanceBlocks: 5000
 ```
 
 ---

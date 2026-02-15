@@ -67,6 +67,22 @@ teleportMode:
   # This ensures players respawn at the new location instead of the old spawn
   setWorldSpawn: true
 
+# Smart chunk reset (partial cleanup instead of full world wipe)
+chunkReset:
+  # Master switch for chunk trimming actions in GUI/command
+  enabled: true
+  # Create a backup snapshot before trimming chunk region files
+  backupBeforeTrim: true
+  inactive:
+    # Delete region files whose filesystem modified time is older than this threshold
+    enabled: true
+    days: 30
+  endDistance:
+    # Only applies to End worlds (<base>_the_end)
+    enabled: true
+    # Delete regions that are fully outside this distance from 0,0
+    minDistanceBlocks: 5000
+
 
 backups:
   # Enable creating backups before reset. Disable to save storage (folders are deleted instead).

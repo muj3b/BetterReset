@@ -1,5 +1,5 @@
 name: BetterReset
-version: 1.2.5
+version: 1.2.6
 main: com.muj3b.betterreset.FullResetPlugin
 api-version: '1.21'
 author: muj3b
@@ -10,7 +10,7 @@ softdepend:
 commands:
   betterreset:
     description: BetterReset root command
-    usage: /betterreset <fullreset|gui|reload|creator|status|stats|cancel|fallback|seedsame|listworlds|about|prune|deleteallbackups|preload|testreset|seeds> [...]
+    usage: /betterreset <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about|prune|deleteallbackups|preload|testreset|trimchunks|seeds|stats> [...]
     aliases: [br]
     permission: betterreset.use
 
@@ -57,9 +57,6 @@ permissions:
   betterreset.bypassconfirm:
     description: Allows bypassing confirmation for /betterreset fullreset
     default: op
-  betterreset.force:
-    description: Allows using --force to skip confirmation
-    default: op
   betterreset.notify:
     description: Receives start/finish reset notifications
     default: op
@@ -77,6 +74,9 @@ permissions:
     default: op
   betterreset.test:
     description: Allows /betterreset testreset <base> [--seed <long>]
+    default: op
+  betterreset.trim:
+    description: Allows /betterreset trimchunks <base> [--overworld|--nether|--end|--all]
     default: op
   betterreset.force:
     description: Allows using --force with /betterreset fullreset

@@ -22,15 +22,19 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Orchestrates the safe reset flow for worlds.
  */
 public class ResetService {
+    private static final Pattern REGION_FILE_PATTERN = Pattern.compile("^r\\.(-?\\d+)\\.(-?\\d+)\\.mca$");
 
     public enum Dimension {
         OVERWORLD, NETHER, END
@@ -53,6 +57,9 @@ public class ResetService {
     private final Map<String, Long> lastResetTimestamp = new ConcurrentHashMap<>();
     private long totalResets = 0;
 
+    public record ChunkTrimResult(String worldName, int scanned, int deleted, int skippedLoaded, int skippedRules) {
+    }
+
     public ResetService(FullResetPlugin plugin, ConfirmationManager confirmationManager,
             CountdownManager countdownManager, MultiverseCompat multiverseCompat, PreloadManager preloadManager) {
         this.plugin = plugin;
@@ -70,29 +77,17 @@ public class ResetService {
     private volatile String phase = "IDLE";
 
     public void startReset(Player player, String baseWorld, EnumSet<Dimension> dimensions) {
-        int cooldownSeconds = plugin.getConfig().getInt("limits.resetCooldownSeconds", 0);
-        if (cooldownSeconds > 0) {
-            Long last = lastResetAt.get(baseWorld);
-            if (last != null && (System.currentTimeMillis() - last) < (cooldownSeconds * 1000L)) {
-                Messages.send(player,
-                        "&cA reset for &6" + baseWorld + "&c was performed recently. Please wait before retrying.");
-                return;
-            }
+        if (!checkLimits(player, baseWorld)) {
+            return;
         }
         if (resetInProgress) {
             Messages.send(player, "&cA reset is already in progress. Please wait.");
             return;
         }
-        int maxOnline = plugin.getConfig().getInt("limits.maxOnlineForReset", -1);
-        if (maxOnline >= 0 && Bukkit.getOnlinePlayers().size() > maxOnline) {
-            Messages.send(player, "&cToo many players online to reset now (&e" + Bukkit.getOnlinePlayers().size()
-                    + "&c > &e" + maxOnline + "&c).");
-            return;
-        }
 
         List<World> affectedWorlds = dimensions.stream().flatMap(dim -> getAffectedWorld(baseWorld, dim).stream())
                 .toList();
-        Optional<Long> effectiveSeed = Optional.of(new Random().nextLong());
+        Optional<Long> effectiveSeed = Optional.of(rng.nextLong());
         try {
             maybePreload(baseWorld, effectiveSeed.get(), dimensions);
         } catch (Throwable ignored) {
@@ -115,6 +110,9 @@ public class ResetService {
 
     public void startResetWithCountdown(Player player, String baseWorld, Optional<Long> seedOpt,
             EnumSet<Dimension> dimensions) {
+        if (!checkLimits(player, baseWorld)) {
+            return;
+        }
         if (resetInProgress) {
             Messages.send(player, "&cA reset is already in progress. Please wait.");
             return;
@@ -142,6 +140,11 @@ public class ResetService {
     }
 
     public void startResetWithCountdown(CommandSender sender, String baseWorld, Optional<Long> seed) {
+        if (sender instanceof Player p) {
+            if (!checkLimits(p, baseWorld)) {
+                return;
+            }
+        }
         Player player = null;
         if (sender instanceof Player p)
             player = p;
@@ -152,6 +155,28 @@ public class ResetService {
             Messages.send(Bukkit.getConsoleSender(), "&eConsole initiated reset for " + baseWorld);
             resetWorldAsync(Bukkit.getConsoleSender(), baseWorld, seed);
         }
+    }
+
+    private boolean checkLimits(CommandSender sender, String baseWorld) {
+        if (!(sender instanceof Player player)) {
+            return true;
+        }
+        int cooldownSeconds = plugin.getConfig().getInt("limits.resetCooldownSeconds", 0);
+        if (cooldownSeconds > 0) {
+            Long last = lastResetAt.get(baseWorld);
+            if (last != null && (System.currentTimeMillis() - last) < (cooldownSeconds * 1000L)) {
+                Messages.send(player,
+                        "&cA reset for &6" + baseWorld + "&c was performed recently. Please wait before retrying.");
+                return false;
+            }
+        }
+        int maxOnline = plugin.getConfig().getInt("limits.maxOnlineForReset", -1);
+        if (maxOnline >= 0 && Bukkit.getOnlinePlayers().size() > maxOnline) {
+            Messages.send(player, "&cToo many players online to reset now (&e" + Bukkit.getOnlinePlayers().size()
+                    + "&c > &e" + maxOnline + "&c).");
+            return false;
+        }
+        return true;
     }
 
     private Optional<World> getAffectedWorld(String baseWorld, Dimension dim) {
@@ -547,6 +572,230 @@ public class ResetService {
 
     public Optional<Long> getLastResetTimestamp(String base) {
         return Optional.ofNullable(lastResetTimestamp.get(base));
+    }
+
+    public void trimChunksAsync(CommandSender initiator, String baseWorld, EnumSet<Dimension> dims) {
+        if (resetInProgress) {
+            Messages.send(initiator, "&cA reset/trim operation is already in progress. Please wait.");
+            return;
+        }
+        if (dims == null || dims.isEmpty()) {
+            Messages.send(initiator, "&cSelect at least one dimension to trim.");
+            return;
+        }
+
+        boolean trimEnabled = plugin.getConfig().getBoolean("chunkReset.enabled", false);
+        if (!trimEnabled) {
+            Messages.send(initiator,
+                    "&cChunk reset is disabled in config (&echunkReset.enabled: false&c). Enable it first.");
+            return;
+        }
+
+        boolean inactiveEnabled = plugin.getConfig().getBoolean("chunkReset.inactive.enabled", true);
+        boolean endDistanceEnabled = plugin.getConfig().getBoolean("chunkReset.endDistance.enabled", true);
+        if (!inactiveEnabled && !endDistanceEnabled) {
+            Messages.send(initiator, "&cNo chunk-reset rules are enabled. Enable inactive and/or end-distance rules.");
+            return;
+        }
+
+        final List<String> worldNames = dimensionNames(baseWorld, dims);
+        final Map<String, Set<Long>> loadedRegionKeysByWorld = new HashMap<>();
+        final Map<String, Path> regionFolders = new HashMap<>();
+
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            for (String worldName : worldNames) {
+                World world = Bukkit.getWorld(worldName);
+                if (world == null) {
+                    continue;
+                }
+                loadedRegionKeysByWorld.put(worldName, loadedRegionKeys(world));
+                Path regionFolder = world.getWorldFolder().toPath().resolve("region");
+                regionFolders.put(worldName, regionFolder);
+            }
+
+            if (regionFolders.isEmpty()) {
+                Messages.send(initiator, "&cNo matching loaded worlds found for base '&e" + baseWorld + "&c'.");
+                return;
+            }
+
+            resetInProgress = true;
+            currentTarget = baseWorld + " [trim]";
+            phase = "RUNNING";
+            Messages.send(initiator, "&eStarting chunk trim for '&6" + baseWorld + "&e'...");
+
+            boolean backupBeforeTrim = plugin.getConfig().getBoolean("chunkReset.backupBeforeTrim", true)
+                    && plugin.getConfig().getBoolean("backups.enabled", true);
+
+            plugin.getBackgroundExecutor().submit(() -> {
+                try {
+                    if (backupBeforeTrim) {
+                        Map<String, Path> snapshotFolders = new HashMap<>();
+                        for (String worldName : regionFolders.keySet()) {
+                            World world = Bukkit.getWorld(worldName);
+                            if (world != null) {
+                                snapshotFolders.put(worldName, world.getWorldFolder().toPath());
+                            }
+                        }
+                        if (!snapshotFolders.isEmpty()) {
+                            backupManager.snapshot(baseWorld, snapshotFolders);
+                        }
+                    }
+
+                    List<ChunkTrimResult> results = new ArrayList<>();
+                    int deletedTotal = 0;
+                    int scannedTotal = 0;
+
+                    for (String worldName : regionFolders.keySet()) {
+                        Path regionFolder = regionFolders.get(worldName);
+                        Set<Long> loaded = loadedRegionKeysByWorld.getOrDefault(worldName, Collections.emptySet());
+                        ChunkTrimResult result = trimWorldRegionFolder(worldName, regionFolder, loaded);
+                        results.add(result);
+                        deletedTotal += result.deleted();
+                        scannedTotal += result.scanned();
+                    }
+
+                    final int deletedCount = deletedTotal;
+                    final int scannedCount = scannedTotal;
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (deletedCount > 0) {
+                            Messages.send(initiator, "&aChunk trim complete. Deleted &e" + deletedCount
+                                    + "&a region files (&e" + scannedCount + "&a scanned).");
+                        } else {
+                            Messages.send(initiator,
+                                    "&7Chunk trim complete. No region files matched the active rules.");
+                        }
+                        for (ChunkTrimResult result : results) {
+                            Messages.send(initiator,
+                                    "&7- &e" + result.worldName() + "&7: deleted &e" + result.deleted()
+                                            + "&7 / scanned &e" + result.scanned() + "&7 (loaded-protected: &e"
+                                            + result.skippedLoaded() + "&7, rule-skip: &e" + result.skippedRules()
+                                            + "&7)");
+                        }
+                        totalResets++;
+                        lastResetTimestamp.put(baseWorld, System.currentTimeMillis());
+                        auditLogger.log(plugin,
+                                "Chunk trim completed for '" + baseWorld + "'; deleted " + deletedCount + " regions.");
+                        resetInProgress = false;
+                        currentTarget = null;
+                        phase = "IDLE";
+                    });
+                } catch (Exception ex) {
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        Messages.send(initiator, "&cChunk trim failed: " + ex.getMessage());
+                        auditLogger.log(plugin,
+                                "Chunk trim failed for '" + baseWorld + "' (exception): " + ex.getMessage());
+                        resetInProgress = false;
+                        currentTarget = null;
+                        phase = "IDLE";
+                    });
+                }
+            });
+        });
+    }
+
+    private ChunkTrimResult trimWorldRegionFolder(String worldName, Path regionFolder, Set<Long> loadedRegionKeys)
+            throws IOException {
+        if (regionFolder == null || !Files.isDirectory(regionFolder)) {
+            return new ChunkTrimResult(worldName, 0, 0, 0, 0);
+        }
+
+        int scanned = 0;
+        int deleted = 0;
+        int skippedLoaded = 0;
+        int skippedRules = 0;
+
+        boolean inactiveEnabled = plugin.getConfig().getBoolean("chunkReset.inactive.enabled", true);
+        long inactiveDays = Math.max(1L, plugin.getConfig().getLong("chunkReset.inactive.days", 30L));
+        long cutoffMillis = System.currentTimeMillis() - Duration.ofDays(inactiveDays).toMillis();
+
+        boolean endDistanceEnabled = plugin.getConfig().getBoolean("chunkReset.endDistance.enabled", true);
+        int minDistanceBlocks = Math.max(0,
+                plugin.getConfig().getInt("chunkReset.endDistance.minDistanceBlocks", 5000));
+        boolean isEndWorld = worldName.endsWith("_the_end");
+
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(regionFolder, "*.mca")) {
+            for (Path file : stream) {
+                scanned++;
+                String name = file.getFileName().toString();
+                Matcher matcher = REGION_FILE_PATTERN.matcher(name);
+                if (!matcher.matches()) {
+                    skippedRules++;
+                    continue;
+                }
+
+                int rx = Integer.parseInt(matcher.group(1));
+                int rz = Integer.parseInt(matcher.group(2));
+                long key = regionKey(rx, rz);
+                if (loadedRegionKeys.contains(key)) {
+                    skippedLoaded++;
+                    continue;
+                }
+
+                boolean deleteByInactive = false;
+                if (inactiveEnabled) {
+                    long lastModified = Files.getLastModifiedTime(file).toMillis();
+                    deleteByInactive = lastModified < cutoffMillis;
+                }
+
+                boolean deleteByEndDistance = false;
+                if (endDistanceEnabled && isEndWorld) {
+                    deleteByEndDistance = isRegionOutsideDistance(rx, rz, minDistanceBlocks);
+                }
+
+                if (!deleteByInactive && !deleteByEndDistance) {
+                    skippedRules++;
+                    continue;
+                }
+
+                try {
+                    Files.deleteIfExists(file);
+                    deleted++;
+                } catch (IOException ex) {
+                    plugin.getLogger().warning("Failed to delete region file '" + file + "': " + ex.getMessage());
+                }
+            }
+        }
+
+        return new ChunkTrimResult(worldName, scanned, deleted, skippedLoaded, skippedRules);
+    }
+
+    private Set<Long> loadedRegionKeys(World world) {
+        Set<Long> keys = new HashSet<>();
+        for (org.bukkit.Chunk chunk : world.getLoadedChunks()) {
+            int rx = Math.floorDiv(chunk.getX(), 32);
+            int rz = Math.floorDiv(chunk.getZ(), 32);
+            keys.add(regionKey(rx, rz));
+        }
+        return keys;
+    }
+
+    private static long regionKey(int rx, int rz) {
+        return ((long) rx << 32) ^ (rz & 0xffffffffL);
+    }
+
+    private static boolean isRegionOutsideDistance(int rx, int rz, int minDistanceBlocks) {
+        if (minDistanceBlocks <= 0) {
+            return true;
+        }
+        int minX = rx * 512;
+        int maxX = minX + 511;
+        int minZ = rz * 512;
+        int maxZ = minZ + 511;
+        long dx = axisDistanceToRange(minX, maxX);
+        long dz = axisDistanceToRange(minZ, maxZ);
+        long distanceSquared = dx * dx + dz * dz;
+        long minSquared = (long) minDistanceBlocks * (long) minDistanceBlocks;
+        return distanceSquared > minSquared;
+    }
+
+    private static long axisDistanceToRange(int min, int max) {
+        if (0 < min) {
+            return min;
+        }
+        if (0 > max) {
+            return -max;
+        }
+        return 0L;
     }
 
     public void restoreBackupAsync(CommandSender initiator, String base, String timestamp) {

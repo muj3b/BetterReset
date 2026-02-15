@@ -15,6 +15,7 @@ public class GuiHolder implements InventoryHolder {
         ARCHIVES,
         ARCHIVE_OPTIONS,
         SETTINGS,
+        TRIM_CONFIRM,
 
         // Full manager types
         SELECT,

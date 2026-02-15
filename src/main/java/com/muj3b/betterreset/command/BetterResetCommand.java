@@ -52,7 +52,9 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                 guiManager.openMainMenu(p);
                 return true;
             }
-            Messages.send(sender, "&eUsage: /" + label + " <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about|prune|deleteallbackups|preload|testreset|seeds|stats>");
+            Messages.send(sender,
+                    "&eUsage: /" + label
+                            + " <fullreset|gui|reload|creator|status|cancel|fallback|seedsame|listworlds|about|prune|deleteallbackups|preload|testreset|trimchunks|seeds|stats>");
             return true;
         }
 
@@ -131,6 +133,9 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
             case "testreset":
                 handleTestReset(sender, args);
                 return true;
+            case "trimchunks":
+                handleTrimChunks(sender, args);
+                return true;
             case "seeds":
                 handleSeeds(sender, args);
                 return true;
@@ -146,7 +151,9 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            List<String> subs = Arrays.asList("fullreset","gui","settings","reload","creator","status","cancel","fallback","seedsame","listworlds","about","prune","deleteallbackups","preload","testreset","seeds","stats");
+            List<String> subs = Arrays.asList("fullreset", "gui", "settings", "reload", "creator", "status", "cancel",
+                    "fallback", "seedsame", "listworlds", "about", "prune", "deleteallbackups", "preload",
+                    "testreset", "trimchunks", "seeds", "stats");
             return subs.stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
         }
 
@@ -154,7 +161,9 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
         if (args.length >= 2) {
             switch (sub) {
                 case "settings" -> {
-                    List<String> secs = Arrays.asList("confirmation","players","limits","countdown","preload","teleport","backups","seeds","deletion","debug","messages");
+                    List<String> secs = Arrays.asList("confirmation", "players", "limits", "countdown", "preload",
+                            "teleport", "teleportMode", "chunkReset", "backups", "seeds", "deletion", "debug",
+                            "messages");
                     return secs.stream().filter(s -> s.startsWith(args[1].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
                 }
                 case "fullreset" -> {
@@ -197,6 +206,15 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                         return new ArrayList<>(allBaseWorlds()).stream().filter(s -> s.startsWith(args[1].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
                     }
                     return Arrays.asList("--seed","--dry-run","--overworld","--nether","--end","--all").stream().filter(s -> s.startsWith(args[args.length - 1].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
+                }
+                case "trimchunks" -> {
+                    if (args.length == 2) {
+                        return new ArrayList<>(allBaseWorlds()).stream()
+                                .filter(s -> s.startsWith(args[1].toLowerCase(Locale.ROOT))).collect(Collectors.toList());
+                    }
+                    return Arrays.asList("--overworld", "--nether", "--end", "--all").stream()
+                            .filter(s -> s.startsWith(args[args.length - 1].toLowerCase(Locale.ROOT)))
+                            .collect(Collectors.toList());
                 }
                 case "seeds" -> {
                     if (args.length == 2) {
@@ -440,6 +458,33 @@ public class BetterResetCommand implements CommandExecutor, TabCompleter {
                 Messages.send(sender, "&cUsage: /betterreset seeds <list|use>");
             }
         }
+    }
+
+    private void handleTrimChunks(CommandSender sender, String[] args) {
+        if (!checkPermission(sender, "betterreset.trim"))
+            return;
+        if (args.length < 2) {
+            Messages.send(sender, "&cUsage: /betterreset trimchunks <base> [--overworld] [--nether] [--end] [--all]");
+            return;
+        }
+        String base = args[1];
+        EnumSet<ResetService.Dimension> dims = EnumSet.noneOf(ResetService.Dimension.class);
+        for (int i = 2; i < args.length; i++) {
+            String token = args[i];
+            switch (token.toLowerCase(Locale.ROOT)) {
+                case "--all" -> dims = EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER,
+                        ResetService.Dimension.END);
+                case "--overworld" -> dims.add(ResetService.Dimension.OVERWORLD);
+                case "--nether" -> dims.add(ResetService.Dimension.NETHER);
+                case "--end" -> dims.add(ResetService.Dimension.END);
+                default -> {
+                }
+            }
+        }
+        if (dims.isEmpty()) {
+            dims = EnumSet.of(ResetService.Dimension.OVERWORLD, ResetService.Dimension.NETHER, ResetService.Dimension.END);
+        }
+        resetService.trimChunksAsync(sender, base, dims);
     }
 
     private void handleStats(CommandSender sender, String[] args) {

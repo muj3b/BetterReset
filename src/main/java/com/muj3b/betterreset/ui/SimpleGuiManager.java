@@ -39,6 +39,11 @@ public class SimpleGuiManager implements Listener {
     private final Map<UUID, Integer> archivePage = new HashMap<>();
     // Track selected dimensions for reset
     private final Map<UUID, EnumSet<ResetService.Dimension>> selectedDims = new HashMap<>();
+    // Track pending trim confirmations
+    private final Map<UUID, PendingTrim> pendingTrim = new HashMap<>();
+
+    private record PendingTrim(String base, EnumSet<ResetService.Dimension> dims) {
+    }
 
     public SimpleGuiManager(FullResetPlugin plugin, ResetService resetService) {
         this.plugin = plugin;
@@ -111,6 +116,7 @@ public class SimpleGuiManager implements Listener {
         switch (holder.getType()) {
             case MAIN -> handleMainClick(p, itemName);
             case RESET -> handleResetClick(p, itemName);
+            case TRIM_CONFIRM -> handleTrimConfirmClick(p, itemName);
             case ARCHIVES -> handleArchivesClick(p, itemName, clicked.getItemMeta());
             case ARCHIVE_OPTIONS -> handleArchiveOptionsClick(p, itemName, clicked.getItemMeta());
             case SETTINGS -> handleSettingsClick(p, itemName);
@@ -154,8 +160,16 @@ public class SimpleGuiManager implements Listener {
 
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent e) {
-        // Clean up any temporary data when GUI closes
-        // Currently no cleanup needed for SimpleGuiManager
+        if (!(e.getPlayer() instanceof Player p)) {
+            return;
+        }
+        Inventory top = e.getView().getTopInventory();
+        if (top == null || !(top.getHolder() instanceof GuiHolder holder)) {
+            return;
+        }
+        if (holder.getType() == GuiHolder.Type.TRIM_CONFIRM) {
+            pendingTrim.remove(p.getUniqueId());
+        }
     }
 
     // ============= MAIN MENU =============
@@ -245,6 +259,16 @@ public class SimpleGuiManager implements Listener {
                 modeText + " Now!",
                 "Random seed",
                 getSelectedDimsText(dims)));
+        boolean trimEnabled = plugin.getConfig().getBoolean("chunkReset.enabled", true);
+        boolean inactiveEnabled = plugin.getConfig().getBoolean("chunkReset.inactive.enabled", true);
+        boolean endDistanceEnabled = plugin.getConfig().getBoolean("chunkReset.endDistance.enabled", true);
+        int endDistanceBlocks = plugin.getConfig().getInt("chunkReset.endDistance.minDistanceBlocks", 5000);
+        inv.setItem(24, createItem(
+                trimEnabled ? Material.IRON_AXE : Material.BARRIER,
+                "Trim Chunks Now",
+                "Uses selected dimensions",
+                "Inactive: " + (inactiveEnabled ? "ON" : "OFF"),
+                "End distance: " + (endDistanceEnabled ? ("ON (" + endDistanceBlocks + " blocks)") : "OFF")));
 
         // Back button
         inv.setItem(31, createItem(Material.ARROW, "Back to BetterReset"));
@@ -293,6 +317,14 @@ public class SimpleGuiManager implements Listener {
                 p.closeInventory();
                 resetService.startReset(p, base, EnumSet.copyOf(dims));
             }
+            case "Trim Chunks Now" -> {
+                if (dims.isEmpty()) {
+                    Messages.send(p, "&cSelect at least one dimension before trimming.");
+                    openResetMenu(p);
+                    return;
+                }
+                openTrimConfirmMenu(p, base, EnumSet.copyOf(dims));
+            }
             case "Teleport Now!" -> {
                 if (dims.isEmpty()) {
                     Messages.send(p, "&cSelect at least one dimension before teleporting.");
@@ -301,6 +333,50 @@ public class SimpleGuiManager implements Listener {
                 }
                 p.closeInventory();
                 resetService.startTeleportWithCountdown(p, base, Optional.empty(), EnumSet.copyOf(dims));
+            }
+        }
+    }
+
+    private void openTrimConfirmMenu(Player p, String base, EnumSet<ResetService.Dimension> dims) {
+        pendingTrim.put(p.getUniqueId(), new PendingTrim(base, EnumSet.copyOf(dims)));
+        GuiHolder holder = new GuiHolder(GuiHolder.Type.TRIM_CONFIRM,
+                TextComponents.darkRed("Confirm Chunk Trim"));
+        Inventory inv = Bukkit.createInventory(holder, 27, holder.getTitle());
+        holder.setInventory(inv);
+
+        boolean inactiveEnabled = plugin.getConfig().getBoolean("chunkReset.inactive.enabled", true);
+        boolean endDistanceEnabled = plugin.getConfig().getBoolean("chunkReset.endDistance.enabled", true);
+        int inactiveDays = plugin.getConfig().getInt("chunkReset.inactive.days", 30);
+        int endDistanceBlocks = plugin.getConfig().getInt("chunkReset.endDistance.minDistanceBlocks", 5000);
+
+        inv.setItem(11, createItem(
+                Material.RED_CONCRETE,
+                "Confirm Chunk Trim",
+                "Base: " + base,
+                "Dimensions: " + getSelectedDimsText(dims),
+                "Inactive: " + (inactiveEnabled ? ("ON (" + inactiveDays + "d)") : "OFF"),
+                "End distance: " + (endDistanceEnabled ? ("ON (" + endDistanceBlocks + " blocks)") : "OFF")));
+        inv.setItem(15, createItem(Material.ARROW, "Cancel"));
+        p.openInventory(inv);
+    }
+
+    private void handleTrimConfirmClick(Player p, String itemName) {
+        PendingTrim pending = pendingTrim.get(p.getUniqueId());
+        if (pending == null) {
+            openResetMenu(p);
+            return;
+        }
+        switch (itemName) {
+            case "Cancel" -> {
+                pendingTrim.remove(p.getUniqueId());
+                openResetMenu(p);
+            }
+            case "Confirm Chunk Trim" -> {
+                pendingTrim.remove(p.getUniqueId());
+                p.closeInventory();
+                resetService.trimChunksAsync(p, pending.base(), EnumSet.copyOf(pending.dims()));
+            }
+            default -> {
             }
         }
     }
@@ -478,6 +554,11 @@ public class SimpleGuiManager implements Listener {
         boolean resetAllOnline = plugin.getConfig().getBoolean("players.resetAllOnlineAfterReset", true);
         boolean forceRespawn = plugin.getConfig().getBoolean("players.forceRespawnToNewOverworld", true);
         boolean resetOffline = plugin.getConfig().getBoolean("players.resetOfflinePlayers", false);
+        boolean chunkTrimEnabled = plugin.getConfig().getBoolean("chunkReset.enabled", true);
+        boolean inactiveTrim = plugin.getConfig().getBoolean("chunkReset.inactive.enabled", true);
+        boolean endDistanceTrim = plugin.getConfig().getBoolean("chunkReset.endDistance.enabled", true);
+        int inactiveDays = plugin.getConfig().getInt("chunkReset.inactive.days", 30);
+        int endDistanceBlocks = plugin.getConfig().getInt("chunkReset.endDistance.minDistanceBlocks", 5000);
 
         // Row 1: Core settings
         inv.setItem(10, createItem(
@@ -583,6 +664,32 @@ public class SimpleGuiManager implements Listener {
                     "Currently: " + (ensureSafe ? "ON - Find safe surface" : "OFF - Basic teleport")));
         }
 
+        inv.setItem(41, createItem(
+                chunkTrimEnabled ? Material.DIAMOND_AXE : Material.BARRIER,
+                "Chunk Trim Mode",
+                "Click to toggle",
+                "Currently: " + (chunkTrimEnabled ? "ON" : "OFF")));
+        inv.setItem(42, createItem(
+                inactiveTrim ? Material.CLOCK : Material.BARRIER,
+                "Inactive Chunk Reset",
+                "Click to toggle",
+                "Currently: " + (inactiveTrim ? "ON (" + inactiveDays + " days)" : "OFF")));
+        inv.setItem(43, createItem(
+                endDistanceTrim ? Material.END_STONE : Material.BARRIER,
+                "End Distance Reset",
+                "Click to toggle",
+                "Currently: " + (endDistanceTrim ? "ON (" + endDistanceBlocks + " blocks)" : "OFF")));
+        inv.setItem(44, createItem(
+                Material.CLOCK,
+                "Inactive Days: " + inactiveDays,
+                "Click to cycle",
+                "Options: 7, 14, 30, 60, 90"));
+        inv.setItem(35, createItem(
+                Material.ENDER_EYE,
+                "End Radius: " + endDistanceBlocks,
+                "Click to cycle",
+                "Options: 3000, 5000, 7500, 10000, 15000"));
+
         inv.setItem(40, createItem(Material.ARROW, "Back to BetterReset"));
 
         p.openInventory(inv);
@@ -686,6 +793,45 @@ public class SimpleGuiManager implements Listener {
         } else if (itemName.equals("Reset Offline Players")) {
             boolean current = plugin.getConfig().getBoolean("players.resetOfflinePlayers", false);
             plugin.getConfig().set("players.resetOfflinePlayers", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        } else if (itemName.equals("Chunk Trim Mode")) {
+            boolean current = plugin.getConfig().getBoolean("chunkReset.enabled", true);
+            plugin.getConfig().set("chunkReset.enabled", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        } else if (itemName.equals("Inactive Chunk Reset")) {
+            boolean current = plugin.getConfig().getBoolean("chunkReset.inactive.enabled", true);
+            plugin.getConfig().set("chunkReset.inactive.enabled", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        } else if (itemName.equals("End Distance Reset")) {
+            boolean current = plugin.getConfig().getBoolean("chunkReset.endDistance.enabled", true);
+            plugin.getConfig().set("chunkReset.endDistance.enabled", !current);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        } else if (itemName.startsWith("Inactive Days:")) {
+            int current = plugin.getConfig().getInt("chunkReset.inactive.days", 30);
+            int next = switch (current) {
+                case 7 -> 14;
+                case 14 -> 30;
+                case 30 -> 60;
+                case 60 -> 90;
+                default -> 7;
+            };
+            plugin.getConfig().set("chunkReset.inactive.days", next);
+            plugin.saveConfig();
+            openSettingsMenu(p);
+        } else if (itemName.startsWith("End Radius:")) {
+            int current = plugin.getConfig().getInt("chunkReset.endDistance.minDistanceBlocks", 5000);
+            int next = switch (current) {
+                case 3000 -> 5000;
+                case 5000 -> 7500;
+                case 7500 -> 10000;
+                case 10000 -> 15000;
+                default -> 3000;
+            };
+            plugin.getConfig().set("chunkReset.endDistance.minDistanceBlocks", next);
             plugin.saveConfig();
             openSettingsMenu(p);
         }
