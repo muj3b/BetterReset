@@ -27,7 +27,7 @@
 ## 📥 Installation
 
 1. Build with `mvn package` (Java 17+).
-2. Place `target/betterreset-1.2.7.jar` into your server’s `plugins/` folder.
+2. Place `target/betterreset-1.2.8.jar` into your server’s `plugins/` folder.
 3. Start the server to generate `plugins/BetterReset/config.yml`.
 4. Tweak messages and behavior in `config.yml` as needed.
 
@@ -126,7 +126,11 @@ Best practices followed: Bukkit calls are main-thread; disk IO deletion is async
 
 ## 🔌 Multiverse-Core
 
-BetterReset doesn’t require Multiverse-Core. If present, the plugin tries (via reflection) to register/import/load recreated worlds so MV stays in sync. World names remain consistent (`<world>`, `<world>_nether`, `<world>_the_end`).
+BetterReset doesn’t require Multiverse-Core. If present, the plugin tries (via reflection) to register/import/load recreated worlds and update the Multiverse spawn so MV stays in sync. World names remain consistent (`<world>`, `<world>_nether`, `<world>_the_end`).
+
+Important: Multiverse-Core cannot unload the default world configured as `level-name` in `server.properties`. To fully regenerate a world live, keep a lobby/fallback world as the server's default world and reset the non-default gameplay world.
+
+BetterReset also includes standalone portal routing for matching world sets (`<world>`, `<world>_nether`, `<world>_the_end`). If Multiverse-NetherPortals is installed, BetterReset defers to it by default.
 
 ---
 
@@ -144,6 +148,7 @@ Open in-game with `/betterreset creator` or click below:
 - `--force` requires the `betterreset.force` permission.  
 - Admin notifications go to players with `betterreset.notify`.  
 - A fallback world can be set via config or `/betterreset fallback <world>`.
+- Full live regeneration requires the target world to be unloadable. Use teleport mode for the server's default world, or make a lobby world the default and reset the gameplay world.
 
 ---
 

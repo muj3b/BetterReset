@@ -54,6 +54,20 @@ teleport:
   # Name of a safe fallback world to send players before deletion. Leave blank to auto-pick/create.
   fallbackWorldName: ""
 
+portalLinks:
+  # Keeps <world>, <world>_nether, and <world>_the_end linked without requiring Multiverse-NetherPortals.
+  enabled: true
+  # If Multiverse-NetherPortals is installed, let it handle portal links instead.
+  deferToMultiverseNetherPortals: true
+  # For Nether portals, allow Paper to create a matching destination portal when none exists.
+  createDestinationPortals: true
+  searchRadius: 128
+  creationRadius: 16
+
+spawn:
+  # After a full overworld reset, search near 0,0 for a safe fresh spawn for the new seed.
+  searchRadius: 256
+
 teleportMode:
   # If true, GUI actions will use a "Teleport" flow instead of resetting the overworld
   # It teleports ALL players to the same safe surface location far away and applies fresh-start resets,

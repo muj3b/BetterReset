@@ -357,7 +357,9 @@ public class ResetService {
                     overworld.getChunkAt(overworld.getSpawnLocation()).load(true);
                 } catch (Exception ignored) {
                 }
+                Location freshSpawn = resetFreshOverworldSpawn(overworld);
                 multiverseCompat.ensureRegistered(base, World.Environment.NORMAL, baseSeed);
+                multiverseCompat.updateSpawn(base, freshSpawn);
             }
 
             long netherSeed = sameSeedForAll ? baseSeed : rng.nextLong();
@@ -404,18 +406,10 @@ public class ResetService {
                 }
             } catch (Exception ignored) {
             }
-            Messages.send(initiator, "&aRecreated worlds for '&e" + base + "&a' successfully.");
 
             boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
             if (returnPlayers && overworld != null) {
                 Location spawn = overworld.getSpawnLocation();
-                // Set world spawn to ensure respawning works correctly
-                try {
-                    overworld.setSpawnLocation(spawn);
-                } catch (Exception ex) {
-                    plugin.getLogger().warning("Failed to set world spawn after reset: " + ex.getMessage());
-                }
-
                 for (UUID id : previouslyAffected) {
                     Player p = Bukkit.getPlayer(id);
                     if (p != null && p.isOnline()) {
@@ -1615,6 +1609,68 @@ public class ResetService {
 
         Messages.send(initiator, "&aTeleport-mode complete. All players moved to the same location &e"
                 + teleportDistance + " blocks away in '&6" + baseWorld + "&a'.");
+    }
+
+    private Location resetFreshOverworldSpawn(World world) {
+        Location spawn = findSafeSpawnNearOrigin(world);
+        try {
+            world.setSpawnLocation(spawn);
+            plugin.getLogger().info("Set fresh spawn for " + world.getName() + " to "
+                    + spawn.getBlockX() + ", " + spawn.getBlockY() + ", " + spawn.getBlockZ());
+        } catch (Exception ex) {
+            plugin.getLogger().warning("Failed to set fresh spawn for " + world.getName() + ": " + ex.getMessage());
+        }
+        return spawn;
+    }
+
+    private Location findSafeSpawnNearOrigin(World world) {
+        int radius = Math.max(16, plugin.getConfig().getInt("spawn.searchRadius", 256));
+        int step = 16;
+
+        Location origin = safeSurfaceAt(world, 0, 0);
+        if (origin != null) {
+            return origin;
+        }
+
+        for (int distance = step; distance <= radius; distance += step) {
+            for (int x = -distance; x <= distance; x += step) {
+                Location north = safeSurfaceAt(world, x, -distance);
+                if (north != null) return north;
+                Location south = safeSurfaceAt(world, x, distance);
+                if (south != null) return south;
+            }
+            for (int z = -distance + step; z <= distance - step; z += step) {
+                Location west = safeSurfaceAt(world, -distance, z);
+                if (west != null) return west;
+                Location east = safeSurfaceAt(world, distance, z);
+                if (east != null) return east;
+            }
+        }
+
+        Location fallback = world.getSpawnLocation();
+        int surfaceY = findSurfaceY(world, fallback.getBlockX(), fallback.getBlockZ());
+        fallback.setY(surfaceY + 1.0D);
+        return fallback;
+    }
+
+    private Location safeSurfaceAt(World world, int x, int z) {
+        try {
+            world.getChunkAt(x >> 4, z >> 4).load(true);
+            int y = findSurfaceY(world, x, z);
+            org.bukkit.block.Block ground = world.getBlockAt(x, y, z);
+            org.bukkit.block.Block feet = world.getBlockAt(x, y + 1, z);
+            org.bukkit.block.Block head = world.getBlockAt(x, y + 2, z);
+            if (ground.getType().isSolid()
+                    && ground.getType() != Material.LAVA
+                    && ground.getType() != Material.WATER
+                    && ground.getType() != Material.BEDROCK
+                    && feet.getType().isAir()
+                    && head.getType().isAir()) {
+                return new Location(world, x + 0.5D, y + 1.0D, z + 0.5D);
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     private Location findSafeSurfaceLocation(World world, int radius, java.util.Random rng) {

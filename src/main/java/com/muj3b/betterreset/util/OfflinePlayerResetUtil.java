@@ -95,7 +95,6 @@ public class OfflinePlayerResetUtil {
     private int performOfflineReset(File worldFolder, Set<UUID> onlineUUIDs) {
         File playerDataDir = new File(worldFolder, "playerdata");
         if (!playerDataDir.exists()) {
-            logger.warning("Player data directory not found for world: " + worldFolder.getName());
             return 0;
         }
 

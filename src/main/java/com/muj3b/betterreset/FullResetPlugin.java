@@ -9,6 +9,7 @@ import com.muj3b.betterreset.ui.SimpleGuiManager;
 import com.muj3b.betterreset.util.CountdownManager;
 import com.muj3b.betterreset.util.MultiverseCompat;
 import com.muj3b.betterreset.util.PlaytimeTracker;
+import com.muj3b.betterreset.util.PortalLinkManager;
 import com.muj3b.betterreset.util.PreloadManager;
 import com.muj3b.betterreset.util.RespawnManager;
 import com.muj3b.betterreset.util.SeedHistory;
@@ -29,6 +30,7 @@ public final class FullResetPlugin extends JavaPlugin {
     private CountdownManager countdownManager;
     private MultiverseCompat multiverseCompat;
     private RespawnManager respawnManager;
+    private PortalLinkManager portalLinkManager;
     private PreloadManager preloadManager;
     private PlaytimeTracker playtimeTracker;
     private ExecutorService backgroundExecutor;
@@ -58,6 +60,7 @@ public final class FullResetPlugin extends JavaPlugin {
                 preloadManager);
         this.guiManager = new SimpleGuiManager(this, resetService);
         this.respawnManager = new RespawnManager(this);
+        this.portalLinkManager = new PortalLinkManager(this);
         this.playtimeTracker = new PlaytimeTracker(this);
 
         // Register commands
