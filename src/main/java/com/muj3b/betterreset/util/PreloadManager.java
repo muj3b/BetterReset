@@ -75,6 +75,10 @@ public class PreloadManager {
         return set != null && set.contains(d);
     }
 
+    public void clearPrepared(String base) {
+        prepared.remove(base.toLowerCase());
+    }
+
     public String prepName(String targetName) { return "brprep_" + targetName; }
 
     private void deleteFolder(Path path) {
@@ -86,4 +90,3 @@ public class PreloadManager {
         } catch (Exception ignored) {}
     }
 }
-

@@ -98,11 +98,14 @@ if (hasComplete && hasMeta) {
     }
 
     public void restore(String base, String timestamp) throws IOException {
+        restore(base, timestamp, Bukkit.getWorldContainer().toPath().toAbsolutePath().normalize());
+    }
+
+    public void restore(String base, String timestamp, Path worldContainer) throws IOException {
         boolean dbg = false; try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
         if (dbg) plugin.getLogger().info("Restore requested: base=" + base + ", ts=" + timestamp);
         Path src = backupsRoot.resolve(base).resolve(timestamp);
         if (!Files.exists(src) || !Files.isDirectory(src)) throw new IOException("Backup not found: " + src);
-        Path worldContainer = Bukkit.getWorldContainer().toPath().toAbsolutePath().normalize();
         try (DirectoryStream<Path> worlds = Files.newDirectoryStream(src)) {
             for (Path w : worlds) {
                 Path dest = worldContainer.resolve(w.getFileName().toString());
@@ -117,11 +120,15 @@ if (hasComplete && hasMeta) {
     }
 
     public void restore(String base, String timestamp, EnumSet<com.muj3b.betterreset.core.ResetService.Dimension> dims) throws IOException {
+        restore(base, timestamp, dims, Bukkit.getWorldContainer().toPath().toAbsolutePath().normalize());
+    }
+
+    public void restore(String base, String timestamp, EnumSet<com.muj3b.betterreset.core.ResetService.Dimension> dims,
+            Path worldContainer) throws IOException {
         boolean dbg = false; try { dbg = plugin.getConfig().getBoolean("debug.backups", false); } catch (Exception ignored) {}
         if (dbg) plugin.getLogger().info("Restore requested: base=" + base + ", ts=" + timestamp + ", dims=" + String.valueOf(dims) + "");
         Path src = backupsRoot.resolve(base).resolve(timestamp);
         if (!Files.exists(src) || !Files.isDirectory(src)) throw new IOException("Backup not found: " + src);
-        Path worldContainer = Bukkit.getWorldContainer().toPath().toAbsolutePath().normalize();
         List<String> names = new ArrayList<>();
         if (dims.contains(com.muj3b.betterreset.core.ResetService.Dimension.OVERWORLD)) names.add(base);
         if (dims.contains(com.muj3b.betterreset.core.ResetService.Dimension.NETHER)) names.add(base + "_nether");

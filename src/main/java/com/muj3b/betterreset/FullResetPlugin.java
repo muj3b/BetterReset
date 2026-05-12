@@ -38,6 +38,14 @@ public final class FullResetPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
 
+        int parallel = Math.max(1, getConfig().getInt("deletion.parallelism", 2));
+        ThreadFactory tf = r -> {
+            Thread t = new Thread(r, "betterreset-bg");
+            t.setDaemon(true);
+            return t;
+        };
+        this.backgroundExecutor = Executors.newFixedThreadPool(parallel, tf);
+
         this.confirmationManager = new ConfirmationManager(this);
         this.countdownManager = new CountdownManager(this);
         this.multiverseCompat = new MultiverseCompat(this);
@@ -51,14 +59,6 @@ public final class FullResetPlugin extends JavaPlugin {
         this.guiManager = new SimpleGuiManager(this, resetService);
         this.respawnManager = new RespawnManager(this);
         this.playtimeTracker = new PlaytimeTracker(this);
-
-        int parallel = Math.max(1, getConfig().getInt("deletion.parallelism", 2));
-        ThreadFactory tf = r -> {
-            Thread t = new Thread(r, "betterreset-bg");
-            t.setDaemon(true);
-            return t;
-        };
-        this.backgroundExecutor = Executors.newFixedThreadPool(parallel, tf);
 
         // Register commands
         BetterResetCommand root = new BetterResetCommand(this, resetService, confirmationManager, guiManager);

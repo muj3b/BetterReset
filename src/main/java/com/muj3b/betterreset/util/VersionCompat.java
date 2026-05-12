@@ -10,6 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.concurrent.Future;
 import java.util.function.Predicate;
 
 /**
@@ -21,9 +22,11 @@ public final class VersionCompat implements Listener {
 
     private static final boolean HAS_MODERN_WORLD = checkModernWorld();
 
+    private final org.bukkit.plugin.Plugin plugin;
     private final Predicate<ChatMessage> messageHandler;
 
     public VersionCompat(@NotNull org.bukkit.plugin.Plugin plugin, @NotNull Predicate<ChatMessage> messageHandler) {
+        this.plugin = plugin;
         this.messageHandler = messageHandler;
         if (plugin != null) Bukkit.getPluginManager().registerEvents(this, plugin);
     }
@@ -58,7 +61,13 @@ public final class VersionCompat implements Listener {
     public void onChat(AsyncPlayerChatEvent e) {
         boolean consumed = false;
         try {
-            consumed = messageHandler.test(new ChatMessage(e.getPlayer(), Component.text(e.getMessage())));
+            ChatMessage message = new ChatMessage(e.getPlayer(), Component.text(e.getMessage()));
+            if (e.isAsynchronous()) {
+                Future<Boolean> result = Bukkit.getScheduler().callSyncMethod(plugin, () -> messageHandler.test(message));
+                consumed = Boolean.TRUE.equals(result.get());
+            } else {
+                consumed = messageHandler.test(message);
+            }
         } catch (Exception ex) {
             try {
                 Bukkit.getLogger().warning("BetterReset VersionCompat chat handler error: " + ex.getMessage());
