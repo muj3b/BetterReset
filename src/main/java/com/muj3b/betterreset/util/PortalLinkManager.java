@@ -94,10 +94,7 @@ public final class PortalLinkManager implements Listener {
 
     private Location safeSpawn(World world) {
         Location spawn = world.getSpawnLocation();
-        int x = spawn.getBlockX();
-        int z = spawn.getBlockZ();
-        int y = Math.max(world.getMinHeight() + 1, world.getHighestBlockYAt(x, z) + 1);
-        return new Location(world, x + 0.5D, y, z + 0.5D, spawn.getYaw(), spawn.getPitch());
+        return SafeSpawnFinder.findNear(world, spawn, 64, 8);
     }
 
     private double clamp(double value, double min, double max) {

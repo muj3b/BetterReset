@@ -27,7 +27,7 @@
 ## 📥 Installation
 
 1. Build with `mvn package` (Java 17+).
-2. Place `target/betterreset-1.2.8.jar` into your server’s `plugins/` folder.
+2. Place `target/betterreset-1.2.9.jar` into your server’s `plugins/` folder.
 3. Start the server to generate `plugins/BetterReset/config.yml`.
 4. Tweak messages and behavior in `config.yml` as needed.
 

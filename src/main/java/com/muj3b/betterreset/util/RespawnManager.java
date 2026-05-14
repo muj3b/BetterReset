@@ -139,41 +139,11 @@ public class RespawnManager implements Listener {
     }
 
     /**
-     * Find a safe spawn location at world spawn, ensuring not inside blocks.
+     * Find a safe surface spawn near the current world spawn.
      */
     private Location findSafeSpawnLocation(World world) {
         Location spawn = world.getSpawnLocation();
-        // Ensure the spawn chunk is loaded
-        if (!spawn.getChunk().isLoaded()) {
-            spawn.getChunk().load(true);
-        }
-
-        // Check if spawn is safe (not inside solid blocks)
-        Location checkLoc = spawn.clone();
-        for (int yOffset = 0; yOffset <= 10; yOffset++) {
-            checkLoc.setY(spawn.getY() + yOffset);
-            if (isSafeLocation(checkLoc)) {
-                return checkLoc;
-            }
-        }
-
-        // If spawn area isn't safe, try to find highest block
-        int highestY = world.getHighestBlockYAt(spawn);
-        Location highLoc = new Location(world, spawn.getX(), highestY + 1, spawn.getZ());
-        if (isSafeLocation(highLoc)) {
-            return highLoc;
-        }
-
-        // Fallback to original spawn
-        return spawn;
-    }
-
-    /**
-     * Check if a location is safe (feet and head positions are not solid).
-     */
-    private boolean isSafeLocation(Location loc) {
-        return !loc.getBlock().getType().isSolid() &&
-                !loc.clone().add(0, 1, 0).getBlock().getType().isSolid();
+        return SafeSpawnFinder.findNear(world, spawn, 64, 8);
     }
 
     /**

@@ -65,8 +65,9 @@ portalLinks:
   creationRadius: 16
 
 spawn:
-  # After a full overworld reset, search near 0,0 for a safe fresh spawn for the new seed.
-  searchRadius: 256
+  # After a full overworld reset, prefer the seed's default spawn column and search nearby for a playable surface.
+  searchRadius: 512
+  searchStep: 8
 
 teleportMode:
   # If true, GUI actions will use a "Teleport" flow instead of resetting the overworld

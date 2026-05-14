@@ -8,13 +8,13 @@ import com.muj3b.betterreset.util.MultiverseCompat;
 import com.muj3b.betterreset.util.PreloadManager;
 import com.muj3b.betterreset.util.OfflinePlayerResetUtil;
 import com.muj3b.betterreset.util.ResetAuditLogger;
+import com.muj3b.betterreset.util.SafeSpawnFinder;
 import com.muj3b.betterreset.util.SeedHistory;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.WorldType;
-import org.bukkit.Material;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
@@ -409,7 +409,7 @@ public class ResetService {
 
             boolean returnPlayers = plugin.getConfig().getBoolean("players.returnToNewSpawnAfterReset", true);
             if (returnPlayers && overworld != null) {
-                Location spawn = overworld.getSpawnLocation();
+                Location spawn = safeWorldSpawn(overworld);
                 for (UUID id : previouslyAffected) {
                     Player p = Bukkit.getPlayer(id);
                     if (p != null && p.isOnline()) {
@@ -875,7 +875,7 @@ public class ResetService {
                                 true);
                         World baseWorld = Bukkit.getWorld(base);
                         if (returnPlayers && baseWorld != null) {
-                            Location spawn = baseWorld.getSpawnLocation();
+                            Location spawn = safeWorldSpawn(baseWorld);
                             for (UUID id : affected) {
                                 Player p = Bukkit.getPlayer(id);
                                 if (p != null && p.isOnline())
@@ -912,7 +912,7 @@ public class ResetService {
                         if (initiator instanceof Player ip) {
                             World w = Bukkit.getWorld(base);
                             if (w != null)
-                                safeTeleport(ip, w.getSpawnLocation());
+                                safeTeleport(ip, safeWorldSpawn(w));
                         }
                         resetInProgress = false;
                         phase = "IDLE";
@@ -983,7 +983,7 @@ public class ResetService {
                                 true);
                         World baseWorld = Bukkit.getWorld(base);
                         if (returnPlayers && baseWorld != null) {
-                            Location spawn = baseWorld.getSpawnLocation();
+                            Location spawn = safeWorldSpawn(baseWorld);
                             for (UUID id : affected) {
                                 Player p = Bukkit.getPlayer(id);
                                 if (p != null && p.isOnline())
@@ -1021,7 +1021,7 @@ public class ResetService {
                         if (initiator instanceof Player ip) {
                             World w = Bukkit.getWorld(base);
                             if (w != null)
-                                safeTeleport(ip, w.getSpawnLocation());
+                                safeTeleport(ip, safeWorldSpawn(w));
                         }
                         resetInProgress = false;
                         phase = "IDLE";
@@ -1353,7 +1353,7 @@ public class ResetService {
         if (world == null) {
             return;
         }
-        Location spawn = world.getSpawnLocation();
+        Location spawn = safeWorldSpawn(world);
         for (UUID id : playerIds) {
             Player player = Bukkit.getPlayer(id);
             if (player != null && player.isOnline()) {
@@ -1612,7 +1612,10 @@ public class ResetService {
     }
 
     private Location resetFreshOverworldSpawn(World world) {
-        Location spawn = findSafeSpawnNearOrigin(world);
+        Location vanillaSpawn = world.getSpawnLocation();
+        int radius = Math.max(16, plugin.getConfig().getInt("spawn.searchRadius", 512));
+        int step = Math.max(4, plugin.getConfig().getInt("spawn.searchStep", 8));
+        Location spawn = SafeSpawnFinder.findNear(world, vanillaSpawn, radius, step);
         try {
             world.setSpawnLocation(spawn);
             plugin.getLogger().info("Set fresh spawn for " + world.getName() + " to "
@@ -1623,54 +1626,8 @@ public class ResetService {
         return spawn;
     }
 
-    private Location findSafeSpawnNearOrigin(World world) {
-        int radius = Math.max(16, plugin.getConfig().getInt("spawn.searchRadius", 256));
-        int step = 16;
-
-        Location origin = safeSurfaceAt(world, 0, 0);
-        if (origin != null) {
-            return origin;
-        }
-
-        for (int distance = step; distance <= radius; distance += step) {
-            for (int x = -distance; x <= distance; x += step) {
-                Location north = safeSurfaceAt(world, x, -distance);
-                if (north != null) return north;
-                Location south = safeSurfaceAt(world, x, distance);
-                if (south != null) return south;
-            }
-            for (int z = -distance + step; z <= distance - step; z += step) {
-                Location west = safeSurfaceAt(world, -distance, z);
-                if (west != null) return west;
-                Location east = safeSurfaceAt(world, distance, z);
-                if (east != null) return east;
-            }
-        }
-
-        Location fallback = world.getSpawnLocation();
-        int surfaceY = findSurfaceY(world, fallback.getBlockX(), fallback.getBlockZ());
-        fallback.setY(surfaceY + 1.0D);
-        return fallback;
-    }
-
-    private Location safeSurfaceAt(World world, int x, int z) {
-        try {
-            world.getChunkAt(x >> 4, z >> 4).load(true);
-            int y = findSurfaceY(world, x, z);
-            org.bukkit.block.Block ground = world.getBlockAt(x, y, z);
-            org.bukkit.block.Block feet = world.getBlockAt(x, y + 1, z);
-            org.bukkit.block.Block head = world.getBlockAt(x, y + 2, z);
-            if (ground.getType().isSolid()
-                    && ground.getType() != Material.LAVA
-                    && ground.getType() != Material.WATER
-                    && ground.getType() != Material.BEDROCK
-                    && feet.getType().isAir()
-                    && head.getType().isAir()) {
-                return new Location(world, x + 0.5D, y + 1.0D, z + 0.5D);
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
+    private Location safeWorldSpawn(World world) {
+        return SafeSpawnFinder.findNear(world, world.getSpawnLocation(), 64, 8);
     }
 
     private Location findSafeSurfaceLocation(World world, int radius, java.util.Random rng) {
@@ -1694,23 +1651,8 @@ public class ResetService {
                     }
                 }
 
-                // Find the highest solid block at this X,Z coordinate (surface level)
-                int y = findSurfaceY(world, x, z);
-                if (y == -1)
-                    continue; // Skip if we can't find a safe surface Y
-
-                Location loc = new Location(world, x + 0.5, y + 1.0, z + 0.5);
-
-                // Verify this is actually a safe surface location
-                org.bukkit.block.Block ground = world.getBlockAt(x, y, z);
-                org.bukkit.block.Block feet = world.getBlockAt(x, y + 1, z);
-                org.bukkit.block.Block head = world.getBlockAt(x, y + 2, z);
-
-                if (ground.getType().isSolid() &&
-                        feet.getType().isAir() &&
-                        head.getType().isAir() &&
-                        ground.getType() != Material.LAVA &&
-                        ground.getType() != Material.WATER) {
+                Location loc = SafeSpawnFinder.surfaceAt(world, x, z);
+                if (loc != null) {
                     return loc;
                 }
             } catch (Throwable ignored) {
@@ -1719,49 +1661,6 @@ public class ResetService {
         }
 
         // Fallback: return spawn location but elevated to surface
-        Location spawn = center.clone();
-        try {
-            int surfaceY = findSurfaceY(world, spawn.getBlockX(), spawn.getBlockZ());
-            if (surfaceY != -1) {
-                spawn.setY(surfaceY + 1.0);
-            }
-        } catch (Exception ignored) {
-        }
-        return spawn;
-    }
-
-    private int findSurfaceY(World world, int x, int z) {
-        try {
-            // Start from a high altitude and work down to find the first solid block
-            // (surface)
-            int maxY = Math.min(world.getMaxHeight() - 1, 320);
-            int minY = Math.max(world.getMinHeight() + 1, 0);
-
-            for (int y = maxY; y >= minY; y--) {
-                org.bukkit.block.Block block = world.getBlockAt(x, y, z);
-                Material type = block.getType();
-
-                // Found a solid block that's suitable for standing on
-                if (type.isSolid() &&
-                        type != Material.LAVA &&
-                        type != Material.WATER &&
-                        type != Material.BEDROCK) {
-
-                    // Make sure there's air space above for player to stand
-                    org.bukkit.block.Block above1 = world.getBlockAt(x, y + 1, z);
-                    org.bukkit.block.Block above2 = world.getBlockAt(x, y + 2, z);
-
-                    if (above1.getType().isAir() && above2.getType().isAir()) {
-                        return y; // Return the Y position of the solid block
-                    }
-                }
-            }
-
-            // If no suitable surface found, return a reasonable default
-            return Math.max(world.getSeaLevel() + 1, 65);
-        } catch (Throwable e) {
-            // Return a safe default if everything fails
-            return Math.max(world.getSeaLevel() + 1, 65);
-        }
+        return SafeSpawnFinder.findNear(world, center, 64, 8);
     }
 }
